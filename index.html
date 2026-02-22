@@ -8,15 +8,16 @@
 <link href="https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&family=DM+Sans:wght@400;500;700&family=Playfair+Display:ital,wght@0,700;1,600&family=Noto+Serif+JP:wght@500;700&display=swap" rel="stylesheet">
 <style>
   * { box-sizing: border-box; margin: 0; padding: 0; }
-  body { background: #0d0d1a; font-family: 'DM Sans', sans-serif; }
-  button, textarea { font-family: inherit; }
-  textarea:focus, button:focus { outline: none; }
+  body { background: #0d0d1a; font-family: 'DM Sans', sans-serif; overflow: hidden; position: fixed; width: 100%; height: 100%; }
+  button, textarea, input { font-family: inherit; }
+  textarea:focus, button:focus, input:focus { outline: none; }
   @keyframes slideUp { from { opacity: 0; transform: translateY(20px); } to { opacity: 1; transform: translateY(0); } }
   @keyframes breathe { 0%,100% { opacity: 0.4; } 50% { opacity: 0.8; } }
   @keyframes pulse { 0%,100% { opacity: 1; transform: scale(1); } 50% { opacity: 0.6; transform: scale(1.05); } }
   ::-webkit-scrollbar { width: 4px; }
   ::-webkit-scrollbar-track { background: transparent; }
   ::-webkit-scrollbar-thumb { background: #2a2a44; border-radius: 2px; }
+  #root { height: 100%; }
 </style>
 </head>
 <body>
@@ -25,7 +26,7 @@
 <script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.23.9/babel.min.js"></script>
 <script type="text/babel">
-const { useState, useRef, useEffect } = React;
+const { useState, useRef, useEffect, useCallback } = React;
 
 const SCENARIOS = [
   {
@@ -48,6 +49,7 @@ const SCENARIOS = [
 const SYS = `あなたはインタラクティブストーリーのゲームマスターです。ユーザーの自由な行動宣言に応じて物語を進めてください。
 
 必ず以下のJSON形式のみで返答してください。JSON以外は一切出力しないでください。
+絵文字や特殊記号は使わず、通常の日本語テキストのみで記述してください。
 {"narrative":"次の場面の描写","situation":"今の状況を1文で要約","sceneNumber":1,"isEnding":false,"endingTitle":"","endingSummary":""}
 
 # 場面描写のルール
@@ -55,7 +57,9 @@ const SYS = `あなたはインタラクティブストーリーのゲームマ�
 - 文体は乾いたトーンで。比喩を1つ入れること。感情を直接書かず、動作や風景で表現する
 - セリフは実際に人が言いそうな、少し不完全で生々しい日本語で書く。丁寧すぎない
 - 場面には必ず2〜3個の具体的なオブジェクト・人物・音・匂いなどを含めること
-- narrativeの最後は「どうする？」系の問いかけで終える（isEnding=trueの場合は不要）
+- narrativeの最後は、目の前の具体的な状況に対する問いかけで終える（isEnding=trueの場合は不要）
+- 問いかけは「今すぐ取れる具体的な行動」を促すものにする。例：「上司のLINEにどう返す？」「傘を持っていくか？」
+- 「今日一日をどう乗り切る？」「どんな決断を下す？」のような抽象的・俯瞰的な問いかけは絶対に禁止
 
 # ユーザー入力の解釈
 - 真面目な回答: そのまま反映
@@ -93,11 +97,36 @@ function App() {
   const [actionLog, setActionLog] = useState([]);
   const [isListening, setIsListening] = useState(false);
   const [fadeIn, setFadeIn] = useState(true);
+  const [viewH, setViewH] = useState(window.innerHeight);
   const inputRef = useRef(null);
   const scrollRef = useRef(null);
   const recRef = useRef(null);
+  const submittingRef = useRef(false);
 
   const fade = () => { setFadeIn(false); requestAnimationFrame(() => requestAnimationFrame(() => setFadeIn(true))); };
+
+  // Fix #4: Track viewport height for keyboard
+  useEffect(() => {
+    const onResize = () => {
+      const vh = window.visualViewport ? window.visualViewport.height : window.innerHeight;
+      setViewH(vh);
+    };
+    if (window.visualViewport) {
+      window.visualViewport.addEventListener("resize", onResize);
+      window.visualViewport.addEventListener("scroll", onResize);
+    } else {
+      window.addEventListener("resize", onResize);
+    }
+    onResize();
+    return () => {
+      if (window.visualViewport) {
+        window.visualViewport.removeEventListener("resize", onResize);
+        window.visualViewport.removeEventListener("scroll", onResize);
+      } else {
+        window.removeEventListener("resize", onResize);
+      }
+    };
+  }, []);
 
   useEffect(() => {
     if (scrollRef.current && scenes.length > 0) {
@@ -106,10 +135,6 @@ function App() {
     }
   }, [scenes, isLoading]);
 
-  useEffect(() => {
-    if (phase === "playing" && inputRef.current && !isLoading) inputRef.current.focus();
-  }, [phase, isLoading, scenes]);
-
   const saveKey = () => {
     if (!keyInput.trim()) return;
     localStorage.setItem("bs2_key", keyInput.trim());
@@ -117,7 +142,22 @@ function App() {
     setPhase("title");
   };
 
+  // Fix #2: Properly release microphone
+  const killMic = useCallback(() => {
+    if (recRef.current) {
+      try { recRef.current.abort(); } catch(e) {}
+      try { recRef.current.stop(); } catch(e) {}
+      recRef.current.onresult = null;
+      recRef.current.onerror = null;
+      recRef.current.onend = null;
+      recRef.current = null;
+    }
+    setIsListening(false);
+  }, []);
+
   const startListening = () => {
+    if (isLoading || submittingRef.current) return;
+    killMic();
     const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
     if (!SR) { setUserInput("（音声入力非対応）"); return; }
     try {
@@ -127,23 +167,28 @@ function App() {
       r.onresult = (e) => {
         const t = Array.from(e.results).map(x => x[0].transcript).join("");
         setUserInput(t);
+        // Fix #1: Use submittingRef to prevent double submit
         if (e.results[e.results.length - 1].isFinal) {
-          setIsListening(false);
-          setTimeout(() => doSubmit(t), 200);
+          killMic();
+          if (!submittingRef.current) {
+            submittingRef.current = true;
+            setTimeout(() => doSubmit(t), 150);
+          }
         }
       };
       r.onerror = (e) => {
-        setIsListening(false);
-        setUserInput(e.error === "not-allowed" ? "（マイクを許可してください）" : "（音声エラー: " + e.error + "）");
+        killMic();
+        if (e.error !== "aborted") {
+          setUserInput(e.error === "not-allowed" ? "（マイクを許可してください）" : "（音声エラー: " + e.error + "）");
+        }
       };
-      r.onend = () => setIsListening(false);
+      r.onend = () => { setIsListening(false); };
       r.start(); setIsListening(true);
     } catch (err) { setUserInput("（音声エラー: " + err.message + "）"); }
   };
 
-  const stopListening = () => { if (recRef.current) recRef.current.stop(); setIsListening(false); };
-
   const startGame = (i) => {
+    killMic();
     const s = SCENARIOS[i];
     setScenario(s);
     setScenes([{ type: "scene", text: s.firstScene, sceneNumber: 0 }]);
@@ -151,12 +196,12 @@ function App() {
       { role: "user", content: "ストーリー設定：「" + s.title + "」\n" + s.setting + "\n\n最初の場面：\n" + s.firstScene + "\n\nsceneNumber=1から開始。了解とだけ答えて。" },
       { role: "assistant", content: "了解" }
     ]);
-    setActionLog([]); setEnding(null); fade(); setPhase("playing");
+    setActionLog([]); setEnding(null); submittingRef.current = false; fade(); setPhase("playing");
   };
 
   const doSubmit = async (text) => {
-    if (!text || isLoading) return;
-    stopListening();
+    if (!text || isLoading) { submittingRef.current = false; return; }
+    killMic();
     setUserInput("");
     setScenes(p => [...p, { type: "action", text }]);
     setActionLog(p => [...p, text]);
@@ -183,7 +228,11 @@ function App() {
 
       let p;
       try {
-        p = JSON.parse(raw.replace(/```json\s*/g, "").replace(/```/g, "").trim());
+        // Fix #3: Strip non-BMP characters (emoji etc) that cause rendering issues
+        const cleaned = raw.replace(/```json\s*/g, "").replace(/```/g, "").trim();
+        p = JSON.parse(cleaned);
+        if (p.narrative) p.narrative = p.narrative.replace(/[\uD800-\uDFFF]./g, "").replace(/.[\uD800-\uDFFF]/g, "");
+        if (p.situation) p.situation = p.situation.replace(/[\uD800-\uDFFF]./g, "").replace(/.[\uD800-\uDFFF]/g, "");
       } catch {
         p = { narrative: raw || "...", situation: "", sceneNumber: scenes.filter(s => s.type === "scene").length + 1, isEnding: false };
       }
@@ -195,13 +244,41 @@ function App() {
       setScenes(prev => [...prev, { type: "scene", text: "（エラー: " + err.message + "）", sceneNumber: -1 }]);
     }
     setIsLoading(false);
+    submittingRef.current = false;
   };
 
-  const submitAction = () => { if (userInput.trim()) doSubmit(userInput.trim()); };
-  const onKey = (e) => { if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing) { e.preventDefault(); submitAction(); } };
+  // Fix #1: Prevent double submit from button press during voice
+  const submitAction = () => {
+    if (!userInput.trim() || isLoading || submittingRef.current) return;
+    submittingRef.current = true;
+    killMic();
+    doSubmit(userInput.trim());
+  };
 
-  const ctr = { minHeight: "100vh", background: "linear-gradient(180deg,#0d0d1a 0%,#141428 50%,#0d0d1a 100%)", display: "flex", justifyContent: "center", alignItems: "flex-start", padding: "20px 16px" };
-  const card = { width: "100%", maxWidth: 480, background: "linear-gradient(165deg,#181830 0%,#12122a 100%)", borderRadius: 24, border: "1px solid #2a2a44", boxShadow: "0 20px 60px #00000066", padding: "28px 22px", opacity: fadeIn ? 1 : 0, transform: fadeIn ? "translateY(0)" : "translateY(12px)", transition: "opacity 0.4s,transform 0.4s" };
+  const onKey = (e) => {
+    if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing) {
+      e.preventDefault();
+      submitAction();
+    }
+  };
+
+  const ctr = {
+    height: viewH,
+    background: "linear-gradient(180deg,#0d0d1a 0%,#141428 50%,#0d0d1a 100%)",
+    display: "flex", justifyContent: "center", alignItems: "flex-start",
+    padding: "12px 12px 0", overflow: "hidden",
+  };
+
+  const card = {
+    width: "100%", maxWidth: 480, height: "100%",
+    background: "linear-gradient(165deg,#181830 0%,#12122a 100%)",
+    borderRadius: "24px 24px 0 0", border: "1px solid #2a2a44", borderBottom: "none",
+    boxShadow: "0 20px 60px #00000066",
+    padding: "20px 18px 0",
+    opacity: fadeIn ? 1 : 0, transform: fadeIn ? "translateY(0)" : "translateY(12px)",
+    transition: "opacity 0.4s,transform 0.4s",
+    display: "flex", flexDirection: "column", overflow: "hidden",
+  };
 
   return (
     <div style={ctr}>
@@ -209,18 +286,16 @@ function App() {
 
         {/* SETUP */}
         {phase === "setup" && (
-          <div style={{ textAlign: "center", animation: "slideUp 0.6s ease" }}>
+          <div style={{ textAlign: "center", animation: "slideUp 0.6s ease", overflowY: "auto", flex: 1, paddingBottom: 20 }}>
             <div style={{ ...mf, fontSize: 11, color: "#64dfdf", letterSpacing: 4, marginBottom: 16 }}>STILLNOVA STUDIO</div>
             <h1 style={{ ...tf, fontSize: 32, color: "#e8e8f0", marginBottom: 24 }}>Brain Story 2sec</h1>
             <div style={{ background: "#1a1a2e", borderRadius: 16, padding: 20, border: "1px solid #2a2a42", textAlign: "left" }}>
               <div style={{ ...mf, fontSize: 11, color: "#64dfdf", marginBottom: 10 }}>API KEY</div>
               <p style={{ fontSize: 12, color: "#6a6a7a", lineHeight: 1.7, marginBottom: 12 }}>
-                Claude APIキーを入力してください。キーはこの端末のみに保存され、外部に送信されません。
+                Claude APIキーを入力してください。キーはこの端末のみに保存されます。
               </p>
               <input
-                type="password"
-                value={keyInput}
-                onChange={e => setKeyInput(e.target.value)}
+                type="password" value={keyInput} onChange={e => setKeyInput(e.target.value)}
                 placeholder="sk-ant-..."
                 style={{ width: "100%", padding: "12px 16px", background: "#12122a", border: "1.5px solid #2a2a42", borderRadius: 12, color: "#d4d4e0", fontSize: 14, marginBottom: 12 }}
               />
@@ -233,7 +308,7 @@ function App() {
 
         {/* TITLE */}
         {phase === "title" && (
-          <div style={{ textAlign: "center", animation: "slideUp 0.6s ease" }}>
+          <div style={{ textAlign: "center", animation: "slideUp 0.6s ease", overflowY: "auto", flex: 1, paddingBottom: 20 }}>
             <div style={{ ...mf, fontSize: 11, color: "#64dfdf", letterSpacing: 4, marginBottom: 12 }}>STILLNOVA STUDIO</div>
             <h1 style={{ ...tf, fontSize: 36, color: "#e8e8f0", lineHeight: 1.3, marginBottom: 4 }}>Brain Story</h1>
             <div style={{ ...mf, fontSize: 22, color: "#64dfdf", marginBottom: 8, letterSpacing: 2 }}>2<span style={{ fontSize: 14, verticalAlign: "super" }}>sec</span></div>
@@ -251,20 +326,20 @@ function App() {
                 </button>
               ))}
             </div>
-            <p style={{ fontSize: 11, color: "#4a4a5a" }}>🎤 声で即答 ・ テキスト入力もOK</p>
+            <p style={{ fontSize: 11, color: "#4a4a5a" }}>声で即答 ・ テキスト入力もOK</p>
             <button onClick={() => { localStorage.removeItem("bs2_key"); setApiKey(""); setPhase("setup"); }} style={{ marginTop: 16, background: "none", border: "none", color: "#3a3a52", fontSize: 11, cursor: "pointer" }}>APIキーを変更</button>
           </div>
         )}
 
         {/* PLAYING */}
         {phase === "playing" && (
-          <div style={{ animation: "slideUp 0.4s ease", display: "flex", flexDirection: "column", height: "min(78vh, 680px)" }}>
-            <div style={{ marginBottom: 12, flexShrink: 0, display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+          <>
+            <div style={{ marginBottom: 10, flexShrink: 0, display: "flex", justifyContent: "space-between", alignItems: "center" }}>
               <span style={{ ...mf, fontSize: 11, color: "#64dfdf", letterSpacing: 3 }}>{scenario.genre} — {scenario.title}</span>
               <span style={{ ...mf, fontSize: 11, color: "#5a5a6a" }}>SCENE {scenes.filter(s => s.type === "scene").length}</span>
             </div>
 
-            <div ref={scrollRef} style={{ flex: 1, overflowY: "auto", marginBottom: 14, paddingRight: 4 }}>
+            <div ref={scrollRef} style={{ flex: 1, overflowY: "auto", marginBottom: 10, paddingRight: 4, minHeight: 0 }}>
               {scenes.map((s, i) => (
                 <div key={i} style={{ marginBottom: 16, animation: i === scenes.length - 1 ? "slideUp 0.5s ease" : "none" }}>
                   {s.type === "scene" ? (
@@ -291,36 +366,47 @@ function App() {
             </div>
 
             {!ending ? (
-              <div style={{ flexShrink: 0 }}>
+              <div style={{ flexShrink: 0, paddingBottom: 8 }}>
                 <div style={{ display: "flex", gap: 8, alignItems: "flex-end" }}>
-                  <button onClick={isListening ? stopListening : startListening} disabled={isLoading} style={{ width: 48, height: 48, border: "none", borderRadius: 14, background: isListening ? "linear-gradient(135deg,#ff4757,#ff6b6b)" : "linear-gradient(135deg,#2a2a42,#1e1e32)", color: isListening ? "#fff" : "#8a8a9a", fontSize: 20, cursor: isLoading ? "default" : "pointer", flexShrink: 0, display: "flex", alignItems: "center", justifyContent: "center", opacity: isLoading ? 0.4 : 1, animation: isListening ? "pulse 1s infinite" : "none" }}>
+                  <button
+                    onClick={isListening ? killMic : startListening}
+                    disabled={isLoading || submittingRef.current}
+                    style={{ width: 48, height: 48, border: "none", borderRadius: 14, background: isListening ? "linear-gradient(135deg,#ff4757,#ff6b6b)" : "linear-gradient(135deg,#2a2a42,#1e1e32)", color: isListening ? "#fff" : "#8a8a9a", fontSize: 20, cursor: isLoading ? "default" : "pointer", flexShrink: 0, display: "flex", alignItems: "center", justifyContent: "center", opacity: isLoading ? 0.4 : 1, animation: isListening ? "pulse 1s infinite" : "none" }}
+                  >
                     🎤
                   </button>
-                  <textarea ref={inputRef} value={userInput} onChange={e => setUserInput(e.target.value)} onKeyDown={onKey} placeholder={isListening ? "聞き取り中..." : "行動を入力 or 🎤で声入力"} disabled={isLoading} rows={2} style={{ flex: 1, padding: "12px 16px", background: "#1a1a2e", border: isListening ? "1.5px solid #ff475766" : "1.5px solid #2a2a42", borderRadius: 14, color: "#d4d4e0", fontSize: 14, resize: "none", lineHeight: 1.6, opacity: isLoading ? 0.4 : 1 }} />
-                  <button onClick={submitAction} disabled={!userInput.trim() || isLoading} style={{ padding: "12px 18px", border: "none", borderRadius: 14, background: userInput.trim() && !isLoading ? "linear-gradient(135deg,#64dfdf,#4ab8b8)" : "#2a2a42", color: userInput.trim() && !isLoading ? "#0d0d1a" : "#5a5a6a", fontSize: 14, fontWeight: 700, cursor: userInput.trim() && !isLoading ? "pointer" : "default", flexShrink: 0, height: 48 }}>→</button>
+                  <textarea
+                    ref={inputRef} value={userInput} onChange={e => setUserInput(e.target.value)} onKeyDown={onKey}
+                    placeholder={isListening ? "聞き取り中..." : "行動を入力 or 🎤で声入力"}
+                    disabled={isLoading} rows={1}
+                    style={{ flex: 1, padding: "12px 16px", background: "#1a1a2e", border: isListening ? "1.5px solid #ff475766" : "1.5px solid #2a2a42", borderRadius: 14, color: "#d4d4e0", fontSize: 14, resize: "none", lineHeight: 1.5, opacity: isLoading ? 0.4 : 1 }}
+                  />
+                  <button
+                    onClick={submitAction}
+                    disabled={!userInput.trim() || isLoading || submittingRef.current}
+                    style={{ padding: "12px 18px", border: "none", borderRadius: 14, background: userInput.trim() && !isLoading ? "linear-gradient(135deg,#64dfdf,#4ab8b8)" : "#2a2a42", color: userInput.trim() && !isLoading ? "#0d0d1a" : "#5a5a6a", fontSize: 14, fontWeight: 700, cursor: userInput.trim() && !isLoading ? "pointer" : "default", flexShrink: 0, height: 44 }}
+                  >→</button>
                 </div>
-                <p style={{ fontSize: 10, color: "#4a4a5a", marginTop: 6, textAlign: "center" }}>🎤 声で即答 ・ テキストもOK</p>
               </div>
             ) : (
-              <div style={{ flexShrink: 0, animation: "slideUp 0.5s ease" }}>
+              <div style={{ flexShrink: 0, animation: "slideUp 0.5s ease", paddingBottom: 8 }}>
                 <div style={{ background: "#1a1a2e", borderRadius: 16, padding: 18, border: "1px solid #64dfdf33", marginBottom: 12 }}>
                   <div style={{ ...mf, fontSize: 10, color: "#64dfdf", letterSpacing: 3, marginBottom: 8 }}>ENDING</div>
                   <div style={{ ...tf, fontSize: 20, color: "#e8e8f0", marginBottom: 10, lineHeight: 1.4 }}>{ending.title}</div>
                   <p style={{ fontSize: 13, color: "#a0a0b0", lineHeight: 1.8 }}>{ending.summary}</p>
                 </div>
                 <div style={{ display: "flex", gap: 8 }}>
-                  <button onClick={() => { fade(); setPhase("ending"); }} style={{ flex: 1, padding: 14, border: "none", borderRadius: 14, background: "linear-gradient(135deg,#64dfdf,#4ab8b8)", color: "#0d0d1a", fontSize: 14, fontWeight: 700, cursor: "pointer" }}>振り返りを見る</button>
-                  <button onClick={() => { fade(); setPhase("title"); }} style={{ flex: 1, padding: 14, border: "1.5px solid #3a3a52", borderRadius: 14, background: "transparent", color: "#8a8a9a", fontSize: 14, cursor: "pointer" }}>別の物語へ</button>
+                  <button onClick={() => { killMic(); fade(); setPhase("ending"); }} style={{ flex: 1, padding: 14, border: "none", borderRadius: 14, background: "linear-gradient(135deg,#64dfdf,#4ab8b8)", color: "#0d0d1a", fontSize: 14, fontWeight: 700, cursor: "pointer" }}>振り返りを見る</button>
+                  <button onClick={() => { killMic(); fade(); setPhase("title"); }} style={{ flex: 1, padding: 14, border: "1.5px solid #3a3a52", borderRadius: 14, background: "transparent", color: "#8a8a9a", fontSize: 14, cursor: "pointer" }}>別の物語へ</button>
                 </div>
-                <p style={{ fontSize: 10, color: "#4a4a5a", marginTop: 8, textAlign: "center" }}>↑ スクロールして物語を読み返せます</p>
               </div>
             )}
-          </div>
+          </>
         )}
 
         {/* ENDING */}
         {phase === "ending" && ending && (
-          <div style={{ animation: "slideUp 0.6s ease" }}>
+          <div style={{ animation: "slideUp 0.6s ease", overflowY: "auto", flex: 1, paddingBottom: 20 }}>
             <div style={{ ...mf, fontSize: 11, color: "#64dfdf", letterSpacing: 3, marginBottom: 24, textAlign: "center" }}>ENDING</div>
             <div style={{ ...tf, fontSize: 28, color: "#e8e8f0", marginBottom: 20, lineHeight: 1.4, textAlign: "center" }}>{ending.title}</div>
             <p style={{ fontSize: 15, color: "#a0a0b0", lineHeight: 2, marginBottom: 20, textAlign: "left" }}>{ending.summary}</p>
