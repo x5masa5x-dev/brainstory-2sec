@@ -12,7 +12,6 @@
   body { background: #0d0d1a; font-family: 'DM Sans', sans-serif; height: 100%; overflow: hidden; -webkit-overflow-scrolling: touch; }
   button, textarea, input { font-family: inherit; -webkit-appearance: none; }
   textarea:focus, button:focus, input:focus { outline: none; }
-  /* Prevent Safari zoom on focus - must be 16px+ */
   input[type="text"] { font-size: 16px !important; }
   @keyframes slideUp { from { opacity: 0; transform: translateY(20px); } to { opacity: 1; transform: translateY(0); } }
   @keyframes breathe { 0%,100% { opacity: 0.4; } 50% { opacity: 0.8; } }
@@ -31,24 +30,9 @@
 <script type="text/babel">
 const { useState, useRef, useEffect, useCallback } = React;
 
-const SCENARIOS = [
-  {
-    id: "rainy_morning", title: "雨の朝", genre: "仕事",
-    setting: "あなたは製造業の班長。今日は重要な取引先が工場見学に来る日。だが昨日、ラインの一つで原因不明の不良品が出た。まだ誰にも報告していない。朝6時、目が覚めた。",
-    firstScene: "窓の外、空が暗い。枕元のスマホに上司からのLINEが1件。まだ読んでいない。キッチンからコーヒーメーカーのタイマーが鳴る音。時計は6:05。\n\nどうする？",
-  },
-  {
-    id: "cat_escape", title: "猫の脱走", genre: "日常",
-    setting: "日曜の朝10時。飼い猫のムギがいない。窓が少し開いている。今日の午後、ムギを動物病院に連れて行く予約がある。ムギは病院が大嫌いだ。",
-    firstScene: "リビングにもキッチンにもムギの姿がない。窓は5cmほど開いている。テーブルの上に動物病院の診察券。玄関の靴箱のそばに、小さな泥の足跡が点々と続いている。\n\nどうする？",
-  },
-  {
-    id: "asteroid", title: "72時間", genre: "壮大",
-    setting: "あなたは国連の危機管理官。小惑星が72時間後に地球に衝突する可能性があるという報告が届いた。だが情報源のNASA職員は、3年前に誤報を出して信頼を失った人物だ。",
-    firstScene: "深夜2時、電話で叩き起こされた。声の主はジェームズ・カーター博士。「直径200mの小惑星、72時間後に最接近。衝突確率12%。まだ公表していません。」受話器の向こうで、博士の呼吸が荒い。デスクの上には、先週の安全保障会議の資料が散らばっている。\n\nどうする？",
-  },
-];
-
+// ============================================================
+// SYSTEM PROMPT — 全面改善版
+// ============================================================
 const SYS = `あなたはインタラクティブストーリーのゲームマスターです。ユーザーの自由な行動宣言に応じて物語を進めてください。
 
 必ず以下のJSON形式のみで返答してください。JSON以外は一切出力しないでください。
@@ -56,33 +40,82 @@ const SYS = `あなたはインタラクティブストーリーのゲームマ�
 {"narrative":"次の場面の描写","situation":"今の状況を1文で要約","sceneNumber":1,"isEnding":false,"endingTitle":"","endingSummary":""}
 
 # 場面描写のルール
-- narrativeは2〜3文。短くても密度の高い描写
+- narrativeは2〜4文。短くても密度の高い描写
 - 文体は乾いたトーンで。比喩を1つ入れること。感情を直接書かず、動作や風景で表現する
-- セリフは実際に人が言いそうな、少し不完全で生々しい日本語で書く。丁寧すぎない
-- 場面には必ず2〜3個の具体的なオブジェクト・人物・音・匂いなどを含めること
-- narrativeの最後は、目の前の具体的な状況に対する問いかけで終える（isEnding=trueの場合は不要）
-- 問いかけは「今すぐ取れる具体的な行動」を促すものにする。例：「上司のLINEにどう返す？」「傘を持っていくか？」
-- 「今日一日をどう乗り切る？」「どんな決断を下す？」のような抽象的・俯瞰的な問いかけは絶対に禁止
+- セリフは実際に人が言いそうな、少し不完全で生々しい日本語で書く
+- 場面には必ず2〜3個の具体的なオブジェクト・人物・音・匂いを含めること
+
+# 問いかけのルール（最重要）
+- narrativeの最後は必ず「AするかBするか」の二択、もしくは「Xをどうする？」という具体的行動の問いで終える
+- 良い例：「鍵を使って開けるか、ノックするか。」「相手に名前を聞くか、先にこちらから名乗るか。」「この手紙を読むか、そのまま棚に戻すか。」
+- 絶対に禁止：「どう乗り切る？」「どんな選択をする？」「次の一手は？」などの抽象的・俯瞰的な問い
+- 絶対に禁止：問いかけなしで状況描写だけで終わること
+- isEnding=trueの場合のみ問いかけ不要
 
 # ユーザー入力の解釈
-- 真面目な回答: そのまま反映
-- 曖昧・短い回答: 迷った描写にして進める
-- ふざけた回答: ユーモアで処理
-- 意味不明: ぼんやり描写にして戻す
-- 危険・暴力: 成功させない。止められる等で回避
-- 現実離れ: 想像だけの描写にして現実に戻す
+- 真面目: そのまま反映
+- 曖昧・短い: 主人公が少し迷いつつも行動する描写にして進める
+- ふざけた: ユーモアで処理。物語は壊さない
+- 意味不明: 主人公がぼんやりした描写にして元の軌道に戻す
+- 危険・暴力: 絶対に成功させない。止められる等で回避
+- 現実離れ: 想像するだけの描写にして現実に戻す
 
-# 物語の構造
-- 緊張と緩和の波。トラブル連続禁止。うまくいく場面も入れる
-- scene 3あたりで予想外の展開を入れる
-- scene 3〜5にジレンマを入れる
-- 良い結果の場面を最低1回入れる
+# 物語の構造（伏線と回収を重視）
+- scene 1で何気なく登場した人物・物・情報が、後のsceneで重要な意味を持つようにすること
+- scene 2〜3で予想外の展開を入れる（隠されていた事実、意外な人物の関与、状況の急変）
+- ユーザーの過去の判断が後のsceneで結果として現れること（良くも悪くも）
+- 緊張と緩和の波を作る。トラブル連続禁止。うまくいく場面やホッとする瞬間も入れる
+- ユーザーの判断が良い結果をもたらした場面を最低1回は入れる
 
-# 収束と結末
+# 収束と結末（5〜6場面で完結）
 - sceneNumberは1から毎回+1
-- scene 5から収束。scene 7〜8でisEnding=true。8超え禁止
-- 結末トーンは多様に（感動/ほっこり/教訓/爽快/切ない/ユーモア）
-- endingSummaryは3〜4文：振り返り、判断傾向分析、次回ヒント`;
+- scene 3〜4から収束開始。scene 5〜6でisEnding=true。6超え禁止
+- 結末では「最初のあの判断がここに繋がったのか」と感じられる構成にする
+- 結末トーンは物語に合わせて多様に（なるほど/感動/ほっこり/爽快/切ない/ユーモア）
+- endingTitleは象徴的な短いタイトル
+- endingSummaryは3〜4文：物語の振り返りと「あのときの判断がこう影響した」という因果の解説。次回へのヒント`;
+
+// ============================================================
+// STORY GENERATION PROMPT
+// ============================================================
+const STORY_GEN_PROMPT = `以下の条件でインタラクティブストーリーの設定を1つ作ってください。
+
+条件：
+- 主人公タイプ: {protagonist}
+- ジャンル: {genre}
+- 気分: {mood}
+
+必ず以下のJSON形式のみで返答してください。JSON以外は一切出力しないでください。
+絵文字や特殊記号は使わず、通常の日本語テキストのみで記述してください。
+{"title":"物語のタイトル（短く）","genre":"ジャンルの短い表記","setting":"2〜3文の設定説明。主人公の状況、隠された秘密や葛藤の種を含める","firstScene":"最初の場面描写。具体的なオブジェクト2〜3個を含め、最後は「AするかBするか」の具体的な二択で終える"}
+
+重要：
+- settingには必ず「まだ誰も知らない事実」「隠れた対立」「タイムリミット」のどれかを仕込むこと
+- firstSceneは3〜4文。五感に訴える描写で始め、最後に具体的な二択で終える
+- ありきたりな設定は避ける。読者が「おっ」と思う意外な組み合わせにする`;
+
+const PROTAGONISTS = [
+  { id: "man", label: "男性", icon: "M" },
+  { id: "woman", label: "女性", icon: "F" },
+  { id: "child", label: "子供", icon: "C" },
+  { id: "nonhuman", label: "人間以外", icon: "?" },
+];
+
+const GENRES = [
+  { id: "work", label: "仕事" },
+  { id: "daily", label: "日常" },
+  { id: "mystery", label: "ミステリー" },
+  { id: "scifi", label: "SF" },
+  { id: "fantasy", label: "ファンタジー" },
+  { id: "survival", label: "サバイバル" },
+];
+
+const MOODS = [
+  { id: "thrill", label: "ハラハラ" },
+  { id: "warm", label: "ほっこり" },
+  { id: "think", label: "考えさせられる" },
+  { id: "funny", label: "笑える" },
+];
 
 const tf = { fontFamily: "'Playfair Display','Noto Serif JP',serif" };
 const mf = { fontFamily: "'DM Mono',monospace" };
@@ -91,7 +124,7 @@ function App() {
   const [apiKey, setApiKey] = useState(localStorage.getItem("bs2_key") || "");
   const [keyInput, setKeyInput] = useState("");
   const [phase, setPhase] = useState(apiKey ? "title" : "setup");
-  const [scenario, setScenario] = useState(SCENARIOS[0]);
+  const [scenario, setScenario] = useState(null);
   const [scenes, setScenes] = useState([]);
   const [userInput, setUserInput] = useState("");
   const [isLoading, setIsLoading] = useState(false);
@@ -101,6 +134,12 @@ function App() {
   const [isListening, setIsListening] = useState(false);
   const [fadeIn, setFadeIn] = useState(true);
   const [viewH, setViewH] = useState(window.innerHeight);
+  // Story generation
+  const [selProtag, setSelProtag] = useState("man");
+  const [selGenre, setSelGenre] = useState("work");
+  const [selMood, setSelMood] = useState("thrill");
+  const [isGenerating, setIsGenerating] = useState(false);
+
   const inputRef = useRef(null);
   const scrollRef = useRef(null);
   const recRef = useRef(null);
@@ -108,7 +147,6 @@ function App() {
 
   const fade = () => { setFadeIn(false); requestAnimationFrame(() => requestAnimationFrame(() => setFadeIn(true))); };
 
-  // Fix #4: Track viewport height for keyboard
   useEffect(() => {
     const onResize = () => {
       const vh = window.visualViewport ? window.visualViewport.height : window.innerHeight;
@@ -117,34 +155,21 @@ function App() {
     if (window.visualViewport) {
       window.visualViewport.addEventListener("resize", onResize);
       window.visualViewport.addEventListener("scroll", onResize);
-    } else {
-      window.addEventListener("resize", onResize);
-    }
+    } else { window.addEventListener("resize", onResize); }
     onResize();
     return () => {
       if (window.visualViewport) {
         window.visualViewport.removeEventListener("resize", onResize);
         window.visualViewport.removeEventListener("scroll", onResize);
-      } else {
-        window.removeEventListener("resize", onResize);
-      }
+      } else { window.removeEventListener("resize", onResize); }
     };
   }, []);
 
-  // Fix Safari auto-scroll on input focus
   useEffect(() => {
     if (!inputRef.current) return;
     const el = inputRef.current;
-    const preventScroll = (e) => {
-      setTimeout(() => {
-        window.scrollTo(0, 0);
-        document.body.scrollTop = 0;
-        document.documentElement.scrollTop = 0;
-        if (window.visualViewport) {
-          const offset = window.visualViewport.offsetTop;
-          if (offset > 0) window.scrollTo(0, 0);
-        }
-      }, 50);
+    const preventScroll = () => {
+      setTimeout(() => { window.scrollTo(0, 0); document.body.scrollTop = 0; document.documentElement.scrollTop = 0; }, 50);
       setTimeout(() => { window.scrollTo(0, 0); }, 300);
     };
     el.addEventListener("focus", preventScroll);
@@ -165,7 +190,6 @@ function App() {
     setPhase("title");
   };
 
-  // Fix #2: Properly release microphone
   const killMic = useCallback(() => {
     if (recRef.current) {
       try { recRef.current.abort(); } catch(e) {}
@@ -190,7 +214,6 @@ function App() {
       r.onresult = (e) => {
         const t = Array.from(e.results).map(x => x[0].transcript).join("");
         setUserInput(t);
-        // Fix #1: Use submittingRef to prevent double submit
         if (e.results[e.results.length - 1].isFinal) {
           killMic();
           if (!submittingRef.current) {
@@ -199,27 +222,51 @@ function App() {
           }
         }
       };
-      r.onerror = (e) => {
-        killMic();
-        if (e.error !== "aborted") {
-          setUserInput(e.error === "not-allowed" ? "（マイクを許可してください）" : "（音声エラー: " + e.error + "）");
-        }
-      };
-      r.onend = () => { setIsListening(false); };
+      r.onerror = (e) => { killMic(); if (e.error !== "aborted") setUserInput("（音声エラー: " + e.error + "）"); };
+      r.onend = () => setIsListening(false);
       r.start(); setIsListening(true);
     } catch (err) { setUserInput("（音声エラー: " + err.message + "）"); }
   };
 
-  const startGame = (i) => {
-    killMic();
-    const s = SCENARIOS[i];
-    setScenario(s);
-    setScenes([{ type: "scene", text: s.firstScene, sceneNumber: 0 }]);
-    setHistory([
-      { role: "user", content: "ストーリー設定：「" + s.title + "」\n" + s.setting + "\n\n最初の場面：\n" + s.firstScene + "\n\nsceneNumber=1から開始。了解とだけ答えて。" },
-      { role: "assistant", content: "了解" }
-    ]);
-    setActionLog([]); setEnding(null); submittingRef.current = false; fade(); setPhase("playing");
+  // API call helper
+  const callAPI = async (system, messages) => {
+    const res = await fetch("/api/chat", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ apiKey, system, messages })
+    });
+    if (!res.ok) {
+      let msg = "HTTP " + res.status;
+      try { msg += ": " + (await res.text()).slice(0, 200); } catch(e) {}
+      throw new Error(msg);
+    }
+    return await res.json();
+  };
+
+  // Generate story from selections
+  const generateStory = async () => {
+    setIsGenerating(true);
+    const prompt = STORY_GEN_PROMPT
+      .replace("{protagonist}", PROTAGONISTS.find(p => p.id === selProtag).label)
+      .replace("{genre}", GENRES.find(g => g.id === selGenre).label)
+      .replace("{mood}", MOODS.find(m => m.id === selMood).label);
+    try {
+      const data = await callAPI(prompt, [{ role: "user", content: "ストーリーを生成してください。" }]);
+      const raw = data.content.map(c => c.type === "text" ? c.text : "").filter(Boolean).join("\n");
+      const cleaned = raw.replace(/```json\s*/g, "").replace(/```/g, "").trim();
+      const s = JSON.parse(cleaned);
+      const sc = { id: "gen_" + Date.now(), title: s.title, genre: s.genre, setting: s.setting, firstScene: s.firstScene };
+      setScenario(sc);
+      setScenes([{ type: "scene", text: sc.firstScene, sceneNumber: 0 }]);
+      setHistory([
+        { role: "user", content: "ストーリー設定：「" + sc.title + "」\n" + sc.setting + "\n\n最初の場面：\n" + sc.firstScene + "\n\nsceneNumber=1から開始。了解とだけ答えて。" },
+        { role: "assistant", content: "了解" }
+      ]);
+      setActionLog([]); setEnding(null); submittingRef.current = false; fade(); setPhase("playing");
+    } catch (err) {
+      alert("ストーリー生成エラー: " + err.message);
+    }
+    setIsGenerating(false);
   };
 
   const doSubmit = async (text) => {
@@ -234,32 +281,14 @@ function App() {
     const th = nh.length <= 14 ? nh : [...nh.slice(0, 2), ...nh.slice(-12)];
 
     try {
-      const res = await fetch("/api/chat", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ apiKey: apiKey, system: SYS, messages: th })
-      });
-
-      if (!res.ok) {
-        let errMsg = "HTTP " + res.status;
-        try { const t = await res.text(); errMsg += ": " + t.slice(0, 200); } catch(e) {}
-        throw new Error(errMsg);
-      }
-
-      const data = await res.json();
+      const data = await callAPI(SYS, th);
       const raw = data.content.map(c => c.type === "text" ? c.text : "").filter(Boolean).join("\n");
-
       let p;
       try {
-        // Fix #3: Strip non-BMP characters (emoji etc) that cause rendering issues
-        const cleaned = raw.replace(/```json\s*/g, "").replace(/```/g, "").trim();
-        p = JSON.parse(cleaned);
-        if (p.narrative) p.narrative = p.narrative.replace(/[\uD800-\uDFFF]./g, "").replace(/.[\uD800-\uDFFF]/g, "");
-        if (p.situation) p.situation = p.situation.replace(/[\uD800-\uDFFF]./g, "").replace(/.[\uD800-\uDFFF]/g, "");
+        p = JSON.parse(raw.replace(/```json\s*/g, "").replace(/```/g, "").trim());
       } catch {
         p = { narrative: raw || "...", situation: "", sceneNumber: scenes.filter(s => s.type === "scene").length + 1, isEnding: false };
       }
-
       setScenes(prev => [...prev, { type: "scene", text: p.narrative, sceneNumber: p.sceneNumber, situation: p.situation }]);
       setHistory([...nh, { role: "assistant", content: JSON.stringify(p) }]);
       if (p.isEnding) setEnding({ title: p.endingTitle || "結末", summary: p.endingSummary || "" });
@@ -270,7 +299,6 @@ function App() {
     submittingRef.current = false;
   };
 
-  // Fix #1: Prevent double submit from button press during voice
   const submitAction = () => {
     if (!userInput.trim() || isLoading || submittingRef.current) return;
     submittingRef.current = true;
@@ -279,10 +307,7 @@ function App() {
   };
 
   const onKey = (e) => {
-    if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing) {
-      e.preventDefault();
-      submitAction();
-    }
+    if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing) { e.preventDefault(); submitAction(); }
   };
 
   const ctr = {
@@ -291,7 +316,6 @@ function App() {
     display: "flex", justifyContent: "center", alignItems: "flex-start",
     padding: "12px 12px 0", overflow: "hidden",
   };
-
   const card = {
     width: "100%", maxWidth: 480, height: "100%",
     background: "linear-gradient(165deg,#181830 0%,#12122a 100%)",
@@ -302,6 +326,14 @@ function App() {
     transition: "opacity 0.4s,transform 0.4s",
     display: "flex", flexDirection: "column", overflow: "hidden",
   };
+
+  const chipStyle = (selected) => ({
+    padding: "8px 14px", border: "none", borderRadius: 10,
+    background: selected ? "#64dfdf22" : "transparent",
+    outline: selected ? "1.5px solid #64dfdf66" : "1.5px solid #2a2a42",
+    color: selected ? "#64dfdf" : "#6a6a7a",
+    fontSize: 13, cursor: "pointer", transition: "all 0.15s",
+  });
 
   return (
     <div style={ctr}>
@@ -315,12 +347,10 @@ function App() {
             <div style={{ background: "#1a1a2e", borderRadius: 16, padding: 20, border: "1px solid #2a2a42", textAlign: "left" }}>
               <div style={{ ...mf, fontSize: 11, color: "#64dfdf", marginBottom: 10 }}>API KEY</div>
               <p style={{ fontSize: 12, color: "#6a6a7a", lineHeight: 1.7, marginBottom: 12 }}>
-                Claude APIキーを入力してください。キーはこの端末のみに保存されます。
+                Claude APIキーを入力してください。この端末のみに保存されます。
               </p>
-              <input
-                type="password" value={keyInput} onChange={e => setKeyInput(e.target.value)}
-                placeholder="sk-ant-..."
-                style={{ width: "100%", padding: "12px 16px", background: "#12122a", border: "1.5px solid #2a2a42", borderRadius: 12, color: "#d4d4e0", fontSize: 14, marginBottom: 12 }}
+              <input type="password" value={keyInput} onChange={e => setKeyInput(e.target.value)} placeholder="sk-ant-..."
+                style={{ width: "100%", padding: "12px 16px", background: "#12122a", border: "1.5px solid #2a2a42", borderRadius: 12, color: "#d4d4e0", fontSize: 16, marginBottom: 12 }}
               />
               <button onClick={saveKey} style={{ width: "100%", padding: 14, border: "none", borderRadius: 14, background: keyInput.trim() ? "linear-gradient(135deg,#64dfdf,#4ab8b8)" : "#2a2a42", color: keyInput.trim() ? "#0d0d1a" : "#5a5a6a", fontSize: 15, fontWeight: 700, cursor: keyInput.trim() ? "pointer" : "default" }}>
                 はじめる
@@ -329,33 +359,65 @@ function App() {
           </div>
         )}
 
-        {/* TITLE */}
+        {/* TITLE — ストーリー生成 */}
         {phase === "title" && (
           <div style={{ textAlign: "center", animation: "slideUp 0.6s ease", overflowY: "auto", flex: 1, paddingBottom: 20 }}>
             <div style={{ ...mf, fontSize: 11, color: "#64dfdf", letterSpacing: 4, marginBottom: 12 }}>STILLNOVA STUDIO</div>
-            <h1 style={{ ...tf, fontSize: 36, color: "#e8e8f0", lineHeight: 1.3, marginBottom: 4 }}>Brain Story</h1>
-            <div style={{ ...mf, fontSize: 22, color: "#64dfdf", marginBottom: 8, letterSpacing: 2 }}>2<span style={{ fontSize: 14, verticalAlign: "super" }}>sec</span></div>
-            <p style={{ fontSize: 13, color: "#7a7a9a", lineHeight: 1.8, marginBottom: 24 }}>あなたの言葉で物語が分岐する</p>
+            <h1 style={{ ...tf, fontSize: 32, color: "#e8e8f0", lineHeight: 1.3, marginBottom: 4 }}>Brain Story</h1>
+            <div style={{ ...mf, fontSize: 20, color: "#64dfdf", marginBottom: 16, letterSpacing: 2 }}>2<span style={{ fontSize: 13, verticalAlign: "super" }}>sec</span></div>
 
-            <div style={{ background: "#1a1a2e", borderRadius: 16, padding: "20px 18px", marginBottom: 20, border: "1px solid #2a2a42", textAlign: "left" }}>
-              <div style={{ ...mf, fontSize: 12, color: "#64dfdf", marginBottom: 14 }}>SELECT STORY</div>
-              {SCENARIOS.map((s, i) => (
-                <button key={s.id} onClick={() => startGame(i)} style={{ display: "flex", alignItems: "center", gap: 12, width: "100%", padding: "14px 16px", marginBottom: 8, background: "linear-gradient(135deg,#1e1e32,#22223a)", border: "1.5px solid #3a3a52", borderRadius: 12, cursor: "pointer", textAlign: "left" }}>
-                  <span style={{ ...mf, fontSize: 10, color: "#64dfdf88", padding: "3px 8px", background: "#1a1a2e", borderRadius: 6, flexShrink: 0 }}>{s.genre}</span>
-                  <div>
-                    <div style={{ fontSize: 15, color: "#d4d4e0", fontWeight: 600, marginBottom: 2 }}>{s.title}</div>
-                    <div style={{ fontSize: 11, color: "#6a6a7a" }}>{s.setting.slice(0, 40)}...</div>
-                  </div>
-                </button>
-              ))}
+            {/* 主人公 */}
+            <div style={{ background: "#1a1a2e", borderRadius: 16, padding: "16px 16px", marginBottom: 10, border: "1px solid #2a2a42", textAlign: "left" }}>
+              <div style={{ ...mf, fontSize: 11, color: "#64dfdf", marginBottom: 10 }}>主人公</div>
+              <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+                {PROTAGONISTS.map(p => (
+                  <button key={p.id} onClick={() => setSelProtag(p.id)} style={chipStyle(selProtag === p.id)}>{p.label}</button>
+                ))}
+              </div>
             </div>
-            <p style={{ fontSize: 11, color: "#4a4a5a" }}>声で即答 ・ テキスト入力もOK</p>
-            <button onClick={() => { localStorage.removeItem("bs2_key"); setApiKey(""); setPhase("setup"); }} style={{ marginTop: 16, background: "none", border: "none", color: "#3a3a52", fontSize: 11, cursor: "pointer" }}>APIキーを変更</button>
+
+            {/* ジャンル */}
+            <div style={{ background: "#1a1a2e", borderRadius: 16, padding: "16px 16px", marginBottom: 10, border: "1px solid #2a2a42", textAlign: "left" }}>
+              <div style={{ ...mf, fontSize: 11, color: "#64dfdf", marginBottom: 10 }}>ジャンル</div>
+              <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+                {GENRES.map(g => (
+                  <button key={g.id} onClick={() => setSelGenre(g.id)} style={chipStyle(selGenre === g.id)}>{g.label}</button>
+                ))}
+              </div>
+            </div>
+
+            {/* 気分 */}
+            <div style={{ background: "#1a1a2e", borderRadius: 16, padding: "16px 16px", marginBottom: 16, border: "1px solid #2a2a42", textAlign: "left" }}>
+              <div style={{ ...mf, fontSize: 11, color: "#64dfdf", marginBottom: 10 }}>気分</div>
+              <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+                {MOODS.map(m => (
+                  <button key={m.id} onClick={() => setSelMood(m.id)} style={chipStyle(selMood === m.id)}>{m.label}</button>
+                ))}
+              </div>
+            </div>
+
+            {/* 生成ボタン */}
+            <button
+              onClick={generateStory}
+              disabled={isGenerating}
+              style={{
+                width: "100%", padding: 16, border: "none", borderRadius: 14,
+                background: isGenerating ? "#2a2a42" : "linear-gradient(135deg,#64dfdf,#4ab8b8)",
+                color: isGenerating ? "#5a5a6a" : "#0d0d1a",
+                fontSize: 16, fontWeight: 700, cursor: isGenerating ? "default" : "pointer",
+                letterSpacing: 1, marginBottom: 10,
+              }}
+            >
+              {isGenerating ? "ストーリー生成中..." : "物語をはじめる"}
+            </button>
+
+            <p style={{ fontSize: 11, color: "#4a4a5a", marginBottom: 6 }}>AIが毎回違う物語を生成します</p>
+            <button onClick={() => { localStorage.removeItem("bs2_key"); setApiKey(""); setPhase("setup"); }} style={{ background: "none", border: "none", color: "#3a3a52", fontSize: 11, cursor: "pointer" }}>APIキーを変更</button>
           </div>
         )}
 
         {/* PLAYING */}
-        {phase === "playing" && (
+        {phase === "playing" && scenario && (
           <>
             <div style={{ marginBottom: 10, flexShrink: 0, display: "flex", justifyContent: "space-between", alignItems: "center" }}>
               <span style={{ ...mf, fontSize: 11, color: "#64dfdf", letterSpacing: 3 }}>{scenario.genre} — {scenario.title}</span>
@@ -391,36 +453,28 @@ function App() {
             {!ending ? (
               <div style={{ flexShrink: 0, paddingBottom: 8 }}>
                 <div style={{ display: "flex", gap: 8, alignItems: "flex-end" }}>
-                  <button
-                    onClick={isListening ? killMic : startListening}
-                    disabled={isLoading || submittingRef.current}
-                    style={{ width: 48, height: 48, border: "none", borderRadius: 14, background: isListening ? "linear-gradient(135deg,#ff4757,#ff6b6b)" : "linear-gradient(135deg,#2a2a42,#1e1e32)", color: isListening ? "#fff" : "#8a8a9a", fontSize: 20, cursor: isLoading ? "default" : "pointer", flexShrink: 0, display: "flex", alignItems: "center", justifyContent: "center", opacity: isLoading ? 0.4 : 1, animation: isListening ? "pulse 1s infinite" : "none" }}
-                  >
+                  <button onClick={isListening ? killMic : startListening} disabled={isLoading || submittingRef.current}
+                    style={{ width: 48, height: 44, border: "none", borderRadius: 14, background: isListening ? "linear-gradient(135deg,#ff4757,#ff6b6b)" : "linear-gradient(135deg,#2a2a42,#1e1e32)", color: isListening ? "#fff" : "#8a8a9a", fontSize: 20, cursor: isLoading ? "default" : "pointer", flexShrink: 0, display: "flex", alignItems: "center", justifyContent: "center", opacity: isLoading ? 0.4 : 1, animation: isListening ? "pulse 1s infinite" : "none" }}>
                     🎤
                   </button>
-                  <input
-                    ref={inputRef} type="text" value={userInput} onChange={e => setUserInput(e.target.value)} onKeyDown={onKey}
-                    placeholder={isListening ? "聞き取り中..." : "行動を入力 or 🎤"}
-                    disabled={isLoading}
-                    style={{ flex: 1, padding: "12px 16px", background: "#1a1a2e", border: isListening ? "1.5px solid #ff475766" : "1.5px solid #2a2a42", borderRadius: 14, color: "#d4d4e0", fontSize: 16, lineHeight: 1.5, opacity: isLoading ? 0.4 : 1, WebkitAppearance: "none" }}
+                  <input ref={inputRef} type="text" value={userInput} onChange={e => setUserInput(e.target.value)} onKeyDown={onKey}
+                    placeholder={isListening ? "聞き取り中..." : "行動を入力 or 🎤"} disabled={isLoading}
+                    style={{ flex: 1, padding: "10px 14px", background: "#1a1a2e", border: isListening ? "1.5px solid #ff475766" : "1.5px solid #2a2a42", borderRadius: 14, color: "#d4d4e0", fontSize: 16, lineHeight: 1.5, opacity: isLoading ? 0.4 : 1, WebkitAppearance: "none" }}
                   />
-                  <button
-                    onClick={submitAction}
-                    disabled={!userInput.trim() || isLoading || submittingRef.current}
-                    style={{ padding: "12px 18px", border: "none", borderRadius: 14, background: userInput.trim() && !isLoading ? "linear-gradient(135deg,#64dfdf,#4ab8b8)" : "#2a2a42", color: userInput.trim() && !isLoading ? "#0d0d1a" : "#5a5a6a", fontSize: 14, fontWeight: 700, cursor: userInput.trim() && !isLoading ? "pointer" : "default", flexShrink: 0, height: 44 }}
-                  >→</button>
+                  <button onClick={submitAction} disabled={!userInput.trim() || isLoading || submittingRef.current}
+                    style={{ padding: "10px 16px", border: "none", borderRadius: 14, background: userInput.trim() && !isLoading ? "linear-gradient(135deg,#64dfdf,#4ab8b8)" : "#2a2a42", color: userInput.trim() && !isLoading ? "#0d0d1a" : "#5a5a6a", fontSize: 14, fontWeight: 700, cursor: userInput.trim() && !isLoading ? "pointer" : "default", flexShrink: 0, height: 44 }}>→</button>
                 </div>
               </div>
             ) : (
               <div style={{ flexShrink: 0, animation: "slideUp 0.5s ease", paddingBottom: 8 }}>
-                <div style={{ background: "#1a1a2e", borderRadius: 16, padding: 18, border: "1px solid #64dfdf33", marginBottom: 12 }}>
-                  <div style={{ ...mf, fontSize: 10, color: "#64dfdf", letterSpacing: 3, marginBottom: 8 }}>ENDING</div>
-                  <div style={{ ...tf, fontSize: 20, color: "#e8e8f0", marginBottom: 10, lineHeight: 1.4 }}>{ending.title}</div>
+                <div style={{ background: "#1a1a2e", borderRadius: 16, padding: 16, border: "1px solid #64dfdf33", marginBottom: 10 }}>
+                  <div style={{ ...mf, fontSize: 10, color: "#64dfdf", letterSpacing: 3, marginBottom: 6 }}>ENDING</div>
+                  <div style={{ ...tf, fontSize: 18, color: "#e8e8f0", marginBottom: 8, lineHeight: 1.4 }}>{ending.title}</div>
                   <p style={{ fontSize: 13, color: "#a0a0b0", lineHeight: 1.8 }}>{ending.summary}</p>
                 </div>
                 <div style={{ display: "flex", gap: 8 }}>
-                  <button onClick={() => { killMic(); fade(); setPhase("ending"); }} style={{ flex: 1, padding: 14, border: "none", borderRadius: 14, background: "linear-gradient(135deg,#64dfdf,#4ab8b8)", color: "#0d0d1a", fontSize: 14, fontWeight: 700, cursor: "pointer" }}>振り返りを見る</button>
-                  <button onClick={() => { killMic(); fade(); setPhase("title"); }} style={{ flex: 1, padding: 14, border: "1.5px solid #3a3a52", borderRadius: 14, background: "transparent", color: "#8a8a9a", fontSize: 14, cursor: "pointer" }}>別の物語へ</button>
+                  <button onClick={() => { killMic(); fade(); setPhase("ending"); }} style={{ flex: 1, padding: 12, border: "none", borderRadius: 14, background: "linear-gradient(135deg,#64dfdf,#4ab8b8)", color: "#0d0d1a", fontSize: 14, fontWeight: 700, cursor: "pointer" }}>振り返り</button>
+                  <button onClick={() => { killMic(); fade(); setPhase("title"); }} style={{ flex: 1, padding: 12, border: "1.5px solid #3a3a52", borderRadius: 14, background: "transparent", color: "#8a8a9a", fontSize: 14, cursor: "pointer" }}>別の物語へ</button>
                 </div>
               </div>
             )}
@@ -428,10 +482,10 @@ function App() {
         )}
 
         {/* ENDING */}
-        {phase === "ending" && ending && (
+        {phase === "ending" && ending && scenario && (
           <div style={{ animation: "slideUp 0.6s ease", overflowY: "auto", flex: 1, paddingBottom: 20 }}>
             <div style={{ ...mf, fontSize: 11, color: "#64dfdf", letterSpacing: 3, marginBottom: 24, textAlign: "center" }}>ENDING</div>
-            <div style={{ ...tf, fontSize: 28, color: "#e8e8f0", marginBottom: 20, lineHeight: 1.4, textAlign: "center" }}>{ending.title}</div>
+            <div style={{ ...tf, fontSize: 26, color: "#e8e8f0", marginBottom: 20, lineHeight: 1.4, textAlign: "center" }}>{ending.title}</div>
             <p style={{ fontSize: 15, color: "#a0a0b0", lineHeight: 2, marginBottom: 20, textAlign: "left" }}>{ending.summary}</p>
 
             <div style={{ background: "#1a1a2e", borderRadius: 16, padding: 18, marginBottom: 16, border: "1px solid #2a2a42", textAlign: "left", maxHeight: 400, overflowY: "auto" }}>
@@ -461,8 +515,8 @@ function App() {
               ))}
             </div>
 
-            <button onClick={() => { fade(); setPhase("title"); }} style={{ width: "100%", padding: 16, border: "none", borderRadius: 14, background: "linear-gradient(135deg,#64dfdf,#4ab8b8)", color: "#0d0d1a", fontSize: 16, fontWeight: 700, cursor: "pointer", letterSpacing: 1, marginBottom: 8 }}>別のストーリーを試す</button>
-            <p style={{ fontSize: 11, color: "#5a5a6a", textAlign: "center" }}>同じストーリーでも、違う行動で違う結末になります</p>
+            <button onClick={() => { fade(); setPhase("title"); }} style={{ width: "100%", padding: 16, border: "none", borderRadius: 14, background: "linear-gradient(135deg,#64dfdf,#4ab8b8)", color: "#0d0d1a", fontSize: 16, fontWeight: 700, cursor: "pointer", letterSpacing: 1, marginBottom: 8 }}>新しい物語をはじめる</button>
+            <p style={{ fontSize: 11, color: "#5a5a6a", textAlign: "center" }}>条件を変えれば全く違う物語が生まれます</p>
           </div>
         )}
 
