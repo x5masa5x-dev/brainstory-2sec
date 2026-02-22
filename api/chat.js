@@ -10,31 +10,31 @@ export default async function handler(req, res) {
   }
 
   try {
-    const body = JSON.stringify({
+    const payload = JSON.stringify({
       model: "claude-sonnet-4-20250514",
       max_tokens: 1000,
       system: system,
       messages: messages
     });
 
+    const encoder = new TextEncoder();
+    const bodyBytes = encoder.encode(payload);
+
     const response = await fetch("https://api.anthropic.com/v1/messages", {
       method: "POST",
       headers: {
-        "Content-Type": "application/json; charset=utf-8",
-        "x-api-key": String(apiKey),
+        "Content-Type": "application/json",
+        "Content-Length": String(bodyBytes.length),
+        "x-api-key": apiKey,
         "anthropic-version": "2023-06-01"
       },
-      body: body
+      body: bodyBytes
     });
 
     const text = await response.text();
 
-    if (!response.ok) {
-      return res.status(response.status).send(text);
-    }
-
     res.setHeader("Content-Type", "application/json; charset=utf-8");
-    return res.status(200).send(text);
+    return res.status(response.status).send(text);
   } catch (err) {
     return res.status(500).json({ error: err.message });
   }
