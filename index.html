@@ -163,30 +163,57 @@ function App(){
   };
 
   // === 5sec Challenge ===
-  // Step 1: User presses "5秒チャレンジ" → show choices + start mic (user gesture!)
+  // CRITICAL: SpeechRecognition.start() must be called synchronously
+  // from the click handler with NO async/state calls before it.
   const startChallenge=()=>{
-    setCp("active");
-    // Start mic immediately (this IS a user gesture so Safari allows it)
     const SR=window.SpeechRecognition||window.webkitSpeechRecognition;
-    if(!SR){submitChoice("（音声非対応）",false);return}
-    try{
-      killMic();
-      const r=new SR();
-      r.lang="ja-JP";r.interimResults=false;r.continuous=false;
-      rRef.current=r;
-      const t0=Date.now();
-      r.onresult=(e)=>{
-        const txt=e.results[0][0].transcript;
-        const sec=(Date.now()-t0)/1000;
-        killMic();
-        submitChoice(txt,sec<=5);
-      };
-      r.onerror=(e)=>{killMic();if(e.error!=="aborted")submitChoice("（迷った）",false)};
-      r.onend=()=>setListening(false);
-      r.start();setListening(true);
-      // 5sec timeout
-      ltRef.current=setTimeout(()=>{killMic();submitChoice("（時間切れ）",false)},5500);
-    }catch(err){submitChoice("（エラー）",false)}
+    if(!SR){setCp("active");setTimeout(()=>submitChoice("（音声非対応）",false),100);return}
+
+    // Create and start recognition FIRST, before any state updates
+    const r=new SR();
+    r.lang="ja-JP";r.interimResults=false;r.continuous=false;
+    const t0=Date.now();
+    let done=false;
+
+    r.onresult=(e)=>{
+      if(done)return;done=true;
+      const txt=e.results[0][0].transcript;
+      const sec=(Date.now()-t0)/1000;
+      clearTimeout(ltRef.current);
+      try{r.stop()}catch(e){}
+      rRef.current=null;
+      setListening(false);
+      submitChoice(txt,sec<=5);
+    };
+    r.onerror=(e)=>{
+      if(done)return;done=true;
+      clearTimeout(ltRef.current);
+      try{r.stop()}catch(e){}
+      rRef.current=null;
+      setListening(false);
+      if(e.error!=="aborted")submitChoice("（迷った）",false);
+    };
+    r.onend=()=>{
+      setListening(false);
+      if(!done){done=true;clearTimeout(ltRef.current);rRef.current=null;submitChoice("（時間切れ）",false)}
+    };
+
+    // START immediately in the click handler call stack
+    r.start();
+
+    // Now update state (after .start() has been called)
+    rRef.current=r;
+    setListening(true);
+    setCp("active");
+
+    // 5sec timeout
+    ltRef.current=setTimeout(()=>{
+      if(done)return;done=true;
+      try{r.abort()}catch(e){}
+      rRef.current=null;
+      setListening(false);
+      submitChoice("（時間切れ）",false);
+    },5500);
   };
 
   const submitChoice=async(text,wasFast)=>{
