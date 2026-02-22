@@ -166,18 +166,10 @@ function App() {
     const th = nh.length <= 14 ? nh : [...nh.slice(0, 2), ...nh.slice(-12)];
 
     try {
-      const headers = {
-        "Content-Type": "application/json",
-        "x-api-key": apiKey,
-        "anthropic-version": "2023-06-01"
-      };
-      // Try adding browser access header (may fail on some browsers)
-      try { headers["anthropic-dangerous-direct-browser-access"] = "true"; } catch(e) {}
-
-      const res = await fetch("https://api.anthropic.com/v1/messages", {
+      const res = await fetch("/api/chat", {
         method: "POST",
-        headers: headers,
-        body: JSON.stringify({ model: "claude-sonnet-4-20250514", max_tokens: 1000, system: SYS, messages: th })
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ apiKey: apiKey, system: SYS, messages: th })
       });
 
       if (!res.ok) {
