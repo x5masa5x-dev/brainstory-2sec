@@ -49,6 +49,11 @@ const SYS=`あなたはインタラクティブストーリーのゲームマス
 - ふざけた回答→ユーモアで処理して進める
 - 曖昧な回答→主人公が少し迷いつつ行動する描写にする
 - 危険・暴力→成功させない
+- 「時間切れ」「迷った」「聞き取れなかった」→主人公が迷っている間に状況が変わる描写にして物語を前に進める。同じ場面を繰り返してはいけない
+
+# 絶対禁止
+- 前の場面と同じ内容・同じ描写を繰り返すこと
+- 物語が止まること。どんな入力でも必ず新しい展開にすること
 
 # 物語
 - scene 1の物や人が後で重要になるように仕込む
@@ -153,6 +158,11 @@ function App(){
       setScenes([{type:"scene",text:scenario.firstScene,sceneNumber:0}]);
       setHist([{role:"user",content:"設定：「"+scenario.title+"」\n"+scenario.setting+"\n\n最初の場面：\n"+scenario.firstScene+"\n\nsceneNumber=1から。了解とだけ答えて。"},{role:"assistant",content:"了解"}]);
       setALog([]);setEnding(null);setFast(0);setTotal(0);subRef.current=false;setChallenging(false);fade();setPhase("playing");
+      // Warm up SpeechRecognition (Safari needs first-run init)
+      try{
+        const SR=window.SpeechRecognition||window.webkitSpeechRecognition;
+        if(SR){const w=new SR();w.lang="ja-JP";w.onend=()=>{};w.onerror=()=>{};w.start();setTimeout(()=>{try{w.abort()}catch(e){}},200)}
+      }catch(e){}
     }catch(err){alert("エラー: "+err.message)}
     setGen(false);
   };
