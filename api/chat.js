@@ -11,7 +11,6 @@ export default async function handler(req, res) {
     return res.status(400).json({ error: "API key required" });
   }
 
-  // Clean the API key - remove any non-ASCII characters
   const cleanKey = apiKey.replace(/[^\x20-\x7E]/g, "").trim();
 
   const payload = JSON.stringify({
@@ -38,9 +37,10 @@ export default async function handler(req, res) {
     };
 
     const request = https.request(options, (response) => {
-      let body = "";
-      response.on("data", (chunk) => { body += chunk; });
+      const chunks = [];
+      response.on("data", (chunk) => { chunks.push(chunk); });
       response.on("end", () => {
+        const body = Buffer.concat(chunks).toString("utf-8");
         res.setHeader("Content-Type", "application/json; charset=utf-8");
         res.status(response.statusCode).send(body);
         resolve();
