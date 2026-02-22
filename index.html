@@ -5,17 +5,18 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
 <title>Brain Story 2sec</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
-<link href="https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&family=DM+Sans:wght@400;500;700&family=Playfair+Display:ital,wght@0,700;1,600&family=Noto+Serif+JP:wght@500;700&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&family=DM+Sans:wght@400;500;700&family=Noto+Sans+JP:wght@400;500;700&display=swap" rel="stylesheet">
 <style>
   * { box-sizing: border-box; margin: 0; padding: 0; }
   html { height: 100%; overflow: hidden; }
-  body { background: #0d0d1a; font-family: 'DM Sans', sans-serif; height: 100%; overflow: hidden; -webkit-overflow-scrolling: touch; }
-  button, textarea, input { font-family: inherit; -webkit-appearance: none; }
-  textarea:focus, button:focus, input:focus { outline: none; }
+  body { background: #0d0d1a; font-family: 'Noto Sans JP', 'DM Sans', sans-serif; height: 100%; overflow: hidden; }
+  button, input { font-family: inherit; -webkit-appearance: none; }
+  button:focus, input:focus { outline: none; }
   input[type="text"] { font-size: 16px !important; }
-  @keyframes slideUp { from { opacity: 0; transform: translateY(20px); } to { opacity: 1; transform: translateY(0); } }
+  @keyframes slideUp { from { opacity: 0; transform: translateY(16px); } to { opacity: 1; transform: translateY(0); } }
   @keyframes breathe { 0%,100% { opacity: 0.4; } 50% { opacity: 0.8; } }
-  @keyframes pulse { 0%,100% { opacity: 1; transform: scale(1); } 50% { opacity: 0.6; transform: scale(1.05); } }
+  @keyframes pulse { 0%,100% { opacity: 1; transform: scale(1); } 50% { opacity: 0.6; transform: scale(1.08); } }
+  @keyframes countdown { from { width: 100%; } to { width: 0%; } }
   ::-webkit-scrollbar { width: 4px; }
   ::-webkit-scrollbar-track { background: transparent; }
   ::-webkit-scrollbar-thumb { background: #2a2a44; border-radius: 2px; }
@@ -31,93 +32,72 @@
 const { useState, useRef, useEffect, useCallback } = React;
 
 // ============================================================
-// SYSTEM PROMPT — 全面改善版
+// SYSTEM PROMPT — シンプル文体 + 二択 + 伏線回収
 // ============================================================
-const SYS = `あなたはインタラクティブストーリーのゲームマスターです。ユーザーの自由な行動宣言に応じて物語を進めてください。
+const SYS = `あなたはインタラクティブストーリーのゲームマスターです。
 
-必ず以下のJSON形式のみで返答してください。JSON以外は一切出力しないでください。
-絵文字や特殊記号は使わず、通常の日本語テキストのみで記述してください。
-{"narrative":"次の場面の描写","situation":"今の状況を1文で要約","sceneNumber":1,"isEnding":false,"endingTitle":"","endingSummary":""}
+必ず以下のJSON形式のみで返答してください。JSON以外は出力禁止。
+絵文字・特殊記号は禁止。普通の日本語テキストのみ。
+{"narrative":"場面の描写","choiceA":"選択肢A（短く）","choiceB":"選択肢B（短く）","situation":"状況を1文で","sceneNumber":1,"isEnding":false,"endingTitle":"","endingSummary":""}
 
-# 場面描写のルール
-- narrativeは2〜4文。短くても密度の高い描写
-- 文体は乾いたトーンで。比喩を1つ入れること。感情を直接書かず、動作や風景で表現する
-- セリフは実際に人が言いそうな、少し不完全で生々しい日本語で書く
-- 場面には必ず2〜3個の具体的なオブジェクト・人物・音・匂いを含めること
+# 文体ルール（最重要）
+- 小学校高学年でも読める、やさしい日本語で書く
+- 1文は短く。長くても40文字以内
+- 難しい言葉や比喩は使わない
+- 「〜のように」「まるで〜」は禁止
+- 具体的に書く。何が見えて、何が聞こえて、何が起きているか
+- narrativeは3〜4文。状況がすぐわかる描写
 
-# 問いかけのルール（最重要）
-- narrativeの最後は必ず「AするかBするか」の二択、もしくは「Xをどうする？」という具体的行動の問いで終える
-- 良い例：「鍵を使って開けるか、ノックするか。」「相手に名前を聞くか、先にこちらから名乗るか。」「この手紙を読むか、そのまま棚に戻すか。」
-- 絶対に禁止：「どう乗り切る？」「どんな選択をする？」「次の一手は？」などの抽象的・俯瞰的な問い
-- 絶対に禁止：問いかけなしで状況描写だけで終わること
-- isEnding=trueの場合のみ問いかけ不要
+# 選択肢ルール
+- choiceAとchoiceBは必ず対照的な2つの行動
+- それぞれ10文字以内の短いフレーズ
+- 良い例：「正直に話す」と「黙っておく」、「右の道」と「左の道」、「電話する」と「メールする」
+- isEnding=trueの場合はchoiceA=""、choiceB=""
 
 # ユーザー入力の解釈
-- 真面目: そのまま反映
-- 曖昧・短い: 主人公が少し迷いつつも行動する描写にして進める
-- ふざけた: ユーモアで処理。物語は壊さない
-- 意味不明: 主人公がぼんやりした描写にして元の軌道に戻す
-- 危険・暴力: 絶対に成功させない。止められる等で回避
-- 現実離れ: 想像するだけの描写にして現実に戻す
+- choiceAかchoiceBに近い回答: そのまま反映
+- それ以外の自由な回答: できるだけ反映して物語に組み込む
+- ふざけた回答: ユーモアで処理して進める
+- 危険・暴力: 成功させない
 
-# 物語の構造（伏線と回収を重視）
-- scene 1で何気なく登場した人物・物・情報が、後のsceneで重要な意味を持つようにすること
-- scene 2〜3で予想外の展開を入れる（隠されていた事実、意外な人物の関与、状況の急変）
-- ユーザーの過去の判断が後のsceneで結果として現れること（良くも悪くも）
-- 緊張と緩和の波を作る。トラブル連続禁止。うまくいく場面やホッとする瞬間も入れる
-- ユーザーの判断が良い結果をもたらした場面を最低1回は入れる
+# 物語の構造
+- scene 1で出てきた物や人が、後で重要になるように仕込む
+- scene 2〜3で「えっ」と思う展開を入れる
+- ユーザーの過去の判断が後の場面で結果として出る
+- 良いことも悪いことも起きる。悪いことばかり続けない
 
-# 収束と結末（5〜6場面で完結）
-- sceneNumberは1から毎回+1
-- scene 3〜4から収束開始。scene 5〜6でisEnding=true。6超え禁止
-- 結末では「最初のあの判断がここに繋がったのか」と感じられる構成にする
-- 結末トーンは物語に合わせて多様に（なるほど/感動/ほっこり/爽快/切ない/ユーモア）
-- endingTitleは象徴的な短いタイトル
-- endingSummaryは3〜4文：物語の振り返りと「あのときの判断がこう影響した」という因果の解説。次回へのヒント`;
+# 結末（5〜6場面で完結）
+- sceneNumberは1から+1
+- scene 4から収束。scene 5〜6でisEnding=true。6超え禁止
+- 結末で「最初のあの選択がここに繋がったんだ」と思える構成にする
+- endingSummaryは3文：物語の振り返り、判断の因果、ひとこと感想`;
 
 // ============================================================
-// STORY GENERATION PROMPT
+// STORY GENERATION
 // ============================================================
-const STORY_GEN_PROMPT = `以下の条件でインタラクティブストーリーの設定を1つ作ってください。
+const STORY_GEN = `以下の条件でストーリーの設定を作ってください。
 
-条件：
-- 主人公タイプ: {protagonist}
-- ジャンル: {genre}
-- 気分: {mood}
+条件：主人公={protagonist}、ジャンル={genre}、気分={mood}
 
-必ず以下のJSON形式のみで返答してください。JSON以外は一切出力しないでください。
-絵文字や特殊記号は使わず、通常の日本語テキストのみで記述してください。
-{"title":"物語のタイトル（短く）","genre":"ジャンルの短い表記","setting":"2〜3文の設定説明。主人公の状況、隠された秘密や葛藤の種を含める","firstScene":"最初の場面描写。具体的なオブジェクト2〜3個を含め、最後は「AするかBするか」の具体的な二択で終える"}
+JSON形式のみで返答。絵文字禁止。やさしい日本語で。
+{"title":"タイトル（短く）","genre":"ジャンル短縮","setting":"2文の設定。秘密やタイムリミットを含める","firstScene":"最初の場面。3〜4文。やさしい日本語。最後は状況の説明で終える","choiceA":"最初の選択肢A（10文字以内）","choiceB":"最初の選択肢B（10文字以内）"}
 
-重要：
-- settingには必ず「まだ誰も知らない事実」「隠れた対立」「タイムリミット」のどれかを仕込むこと
-- firstSceneは3〜4文。五感に訴える描写で始め、最後に具体的な二択で終える
-- ありきたりな設定は避ける。読者が「おっ」と思う意外な組み合わせにする`;
+注意：小学校高学年が読める文章で書く。比喩禁止。1文40文字以内。`;
 
-const PROTAGONISTS = [
-  { id: "man", label: "男性", icon: "M" },
-  { id: "woman", label: "女性", icon: "F" },
-  { id: "child", label: "子供", icon: "C" },
-  { id: "nonhuman", label: "人間以外", icon: "?" },
+const PROTAGS = [
+  { id: "man", label: "男性" }, { id: "woman", label: "女性" },
+  { id: "child", label: "子供" }, { id: "nonhuman", label: "人間以外" },
 ];
-
 const GENRES = [
-  { id: "work", label: "仕事" },
-  { id: "daily", label: "日常" },
-  { id: "mystery", label: "ミステリー" },
-  { id: "scifi", label: "SF" },
-  { id: "fantasy", label: "ファンタジー" },
-  { id: "survival", label: "サバイバル" },
+  { id: "work", label: "仕事" }, { id: "daily", label: "日常" },
+  { id: "mystery", label: "ミステリー" }, { id: "scifi", label: "SF" },
+  { id: "fantasy", label: "ファンタジー" }, { id: "survival", label: "サバイバル" },
 ];
-
 const MOODS = [
-  { id: "thrill", label: "ハラハラ" },
-  { id: "warm", label: "ほっこり" },
-  { id: "think", label: "考えさせられる" },
-  { id: "funny", label: "笑える" },
+  { id: "thrill", label: "ハラハラ" }, { id: "warm", label: "ほっこり" },
+  { id: "think", label: "考えさせられる" }, { id: "funny", label: "笑える" },
 ];
 
-const tf = { fontFamily: "'Playfair Display','Noto Serif JP',serif" };
 const mf = { fontFamily: "'DM Mono',monospace" };
 
 function App() {
@@ -134,46 +114,42 @@ function App() {
   const [isListening, setIsListening] = useState(false);
   const [fadeIn, setFadeIn] = useState(true);
   const [viewH, setViewH] = useState(window.innerHeight);
-  // Story generation
-  const [selProtag, setSelProtag] = useState("man");
-  const [selGenre, setSelGenre] = useState("work");
-  const [selMood, setSelMood] = useState("thrill");
-  const [isGenerating, setIsGenerating] = useState(false);
+  const [selP, setSelP] = useState("man");
+  const [selG, setSelG] = useState("daily");
+  const [selM, setSelM] = useState("thrill");
+  const [isGen, setIsGen] = useState(false);
+  // 2sec challenge
+  const [choices, setChoices] = useState(null); // {a, b}
+  const [challengePhase, setChallengePhase] = useState("idle"); // idle | ready | countdown | listening | done
+  const [instantCount, setInstantCount] = useState(0);
+  const [totalChoices, setTotalChoices] = useState(0);
 
   const inputRef = useRef(null);
   const scrollRef = useRef(null);
   const recRef = useRef(null);
   const submittingRef = useRef(false);
+  const countdownRef = useRef(null);
+  const listenTimerRef = useRef(null);
 
   const fade = () => { setFadeIn(false); requestAnimationFrame(() => requestAnimationFrame(() => setFadeIn(true))); };
 
   useEffect(() => {
-    const onResize = () => {
-      const vh = window.visualViewport ? window.visualViewport.height : window.innerHeight;
-      setViewH(vh);
-    };
-    if (window.visualViewport) {
-      window.visualViewport.addEventListener("resize", onResize);
-      window.visualViewport.addEventListener("scroll", onResize);
-    } else { window.addEventListener("resize", onResize); }
-    onResize();
+    const fn = () => setViewH(window.visualViewport ? window.visualViewport.height : window.innerHeight);
+    if (window.visualViewport) { window.visualViewport.addEventListener("resize", fn); window.visualViewport.addEventListener("scroll", fn); }
+    else window.addEventListener("resize", fn);
+    fn();
     return () => {
-      if (window.visualViewport) {
-        window.visualViewport.removeEventListener("resize", onResize);
-        window.visualViewport.removeEventListener("scroll", onResize);
-      } else { window.removeEventListener("resize", onResize); }
+      if (window.visualViewport) { window.visualViewport.removeEventListener("resize", fn); window.visualViewport.removeEventListener("scroll", fn); }
+      else window.removeEventListener("resize", fn);
     };
   }, []);
 
   useEffect(() => {
     if (!inputRef.current) return;
     const el = inputRef.current;
-    const preventScroll = () => {
-      setTimeout(() => { window.scrollTo(0, 0); document.body.scrollTop = 0; document.documentElement.scrollTop = 0; }, 50);
-      setTimeout(() => { window.scrollTo(0, 0); }, 300);
-    };
-    el.addEventListener("focus", preventScroll);
-    return () => el.removeEventListener("focus", preventScroll);
+    const ps = () => { setTimeout(() => window.scrollTo(0, 0), 50); setTimeout(() => window.scrollTo(0, 0), 300); };
+    el.addEventListener("focus", ps);
+    return () => el.removeEventListener("focus", ps);
   }, [phase]);
 
   useEffect(() => {
@@ -183,99 +159,104 @@ function App() {
     }
   }, [scenes, isLoading]);
 
-  const saveKey = () => {
-    if (!keyInput.trim()) return;
-    localStorage.setItem("bs2_key", keyInput.trim());
-    setApiKey(keyInput.trim());
-    setPhase("title");
-  };
+  const saveKey = () => { if (!keyInput.trim()) return; localStorage.setItem("bs2_key", keyInput.trim()); setApiKey(keyInput.trim()); setPhase("title"); };
 
   const killMic = useCallback(() => {
-    if (recRef.current) {
-      try { recRef.current.abort(); } catch(e) {}
-      try { recRef.current.stop(); } catch(e) {}
-      recRef.current.onresult = null;
-      recRef.current.onerror = null;
-      recRef.current.onend = null;
-      recRef.current = null;
-    }
+    if (recRef.current) { try { recRef.current.abort(); } catch(e) {} try { recRef.current.stop(); } catch(e) {} recRef.current.onresult = null; recRef.current.onerror = null; recRef.current.onend = null; recRef.current = null; }
     setIsListening(false);
   }, []);
 
-  const startListening = () => {
-    if (isLoading || submittingRef.current) return;
-    killMic();
-    const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
-    if (!SR) { setUserInput("（音声入力非対応）"); return; }
-    try {
-      const r = new SR();
-      r.lang = "ja-JP"; r.interimResults = true; r.continuous = false;
-      recRef.current = r;
-      r.onresult = (e) => {
-        const t = Array.from(e.results).map(x => x[0].transcript).join("");
-        setUserInput(t);
-        if (e.results[e.results.length - 1].isFinal) {
-          killMic();
-          if (!submittingRef.current) {
-            submittingRef.current = true;
-            setTimeout(() => doSubmit(t), 150);
-          }
-        }
-      };
-      r.onerror = (e) => { killMic(); if (e.error !== "aborted") setUserInput("（音声エラー: " + e.error + "）"); };
-      r.onend = () => setIsListening(false);
-      r.start(); setIsListening(true);
-    } catch (err) { setUserInput("（音声エラー: " + err.message + "）"); }
-  };
-
-  // API call helper
   const callAPI = async (system, messages) => {
-    const res = await fetch("/api/chat", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ apiKey, system, messages })
-    });
-    if (!res.ok) {
-      let msg = "HTTP " + res.status;
-      try { msg += ": " + (await res.text()).slice(0, 200); } catch(e) {}
-      throw new Error(msg);
-    }
+    const res = await fetch("/api/chat", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ apiKey, system, messages }) });
+    if (!res.ok) { let m = "HTTP " + res.status; try { m += ": " + (await res.text()).slice(0, 200); } catch(e) {} throw new Error(m); }
     return await res.json();
   };
 
-  // Generate story from selections
-  const generateStory = async () => {
-    setIsGenerating(true);
-    const prompt = STORY_GEN_PROMPT
-      .replace("{protagonist}", PROTAGONISTS.find(p => p.id === selProtag).label)
-      .replace("{genre}", GENRES.find(g => g.id === selGenre).label)
-      .replace("{mood}", MOODS.find(m => m.id === selMood).label);
+  const parseJSON = (raw) => {
+    try { return JSON.parse(raw.replace(/```json\s*/g, "").replace(/```/g, "").trim()); } catch { return null; }
+  };
+
+  // Generate story
+  const genStory = async () => {
+    setIsGen(true);
+    const prompt = STORY_GEN.replace("{protagonist}", PROTAGS.find(p => p.id === selP).label).replace("{genre}", GENRES.find(g => g.id === selG).label).replace("{mood}", MOODS.find(m => m.id === selM).label);
     try {
-      const data = await callAPI(prompt, [{ role: "user", content: "ストーリーを生成してください。" }]);
+      const data = await callAPI(prompt, [{ role: "user", content: "ストーリーを作って。" }]);
       const raw = data.content.map(c => c.type === "text" ? c.text : "").filter(Boolean).join("\n");
-      const cleaned = raw.replace(/```json\s*/g, "").replace(/```/g, "").trim();
-      const s = JSON.parse(cleaned);
-      const sc = { id: "gen_" + Date.now(), title: s.title, genre: s.genre, setting: s.setting, firstScene: s.firstScene };
+      const s = parseJSON(raw);
+      if (!s) throw new Error("JSON parse failed");
+      const sc = { id: "g" + Date.now(), title: s.title, genre: s.genre, setting: s.setting, firstScene: s.firstScene };
       setScenario(sc);
       setScenes([{ type: "scene", text: sc.firstScene, sceneNumber: 0 }]);
       setHistory([
-        { role: "user", content: "ストーリー設定：「" + sc.title + "」\n" + sc.setting + "\n\n最初の場面：\n" + sc.firstScene + "\n\nsceneNumber=1から開始。了解とだけ答えて。" },
+        { role: "user", content: "設定：「" + sc.title + "」\n" + sc.setting + "\n\n最初の場面：\n" + sc.firstScene + "\n\nsceneNumber=1から。了解とだけ答えて。" },
         { role: "assistant", content: "了解" }
       ]);
-      setActionLog([]); setEnding(null); submittingRef.current = false; fade(); setPhase("playing");
-    } catch (err) {
-      alert("ストーリー生成エラー: " + err.message);
-    }
-    setIsGenerating(false);
+      setChoices(s.choiceA && s.choiceB ? { a: s.choiceA, b: s.choiceB } : null);
+      setChallengePhase("idle");
+      setActionLog([]); setEnding(null); setInstantCount(0); setTotalChoices(0); submittingRef.current = false; fade(); setPhase("playing");
+    } catch (err) { alert("エラー: " + err.message); }
+    setIsGen(false);
   };
 
-  const doSubmit = async (text) => {
-    if (!text || isLoading) { submittingRef.current = false; return; }
-    killMic();
+  // 2sec challenge flow
+  const startChallenge = () => {
+    setChallengePhase("countdown");
+    // Show choices for 2 sec, then auto-start mic
+    countdownRef.current = setTimeout(() => {
+      setChallengePhase("listening");
+      startChallengeListening();
+    }, 2000);
+  };
+
+  const startChallengeListening = () => {
+    const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+    if (!SR) { setChallengePhase("done"); doSubmitChoice("（音声非対応）"); return; }
+    try {
+      killMic();
+      const r = new SR();
+      r.lang = "ja-JP"; r.interimResults = false; r.continuous = false;
+      recRef.current = r;
+      const startTime = Date.now();
+      r.onresult = (e) => {
+        const t = e.results[0][0].transcript;
+        const elapsed = (Date.now() - startTime) / 1000;
+        killMic();
+        clearTimeout(listenTimerRef.current);
+        setTotalChoices(c => c + 1);
+        if (elapsed <= 2) setInstantCount(c => c + 1);
+        setChallengePhase("done");
+        doSubmitChoice(t);
+      };
+      r.onerror = (e) => {
+        killMic();
+        clearTimeout(listenTimerRef.current);
+        if (e.error !== "aborted") {
+          setChallengePhase("done");
+          setTotalChoices(c => c + 1);
+          doSubmitChoice("（迷った）");
+        }
+      };
+      r.onend = () => setIsListening(false);
+      r.start(); setIsListening(true);
+      // 2sec listening limit
+      listenTimerRef.current = setTimeout(() => {
+        killMic();
+        setChallengePhase("done");
+        setTotalChoices(c => c + 1);
+        doSubmitChoice("（迷った）");
+      }, 2500);
+    } catch (err) { setChallengePhase("done"); doSubmitChoice("（エラー）"); }
+  };
+
+  const doSubmitChoice = async (text) => {
+    if (submittingRef.current) return;
+    submittingRef.current = true;
     setUserInput("");
     setScenes(p => [...p, { type: "action", text }]);
     setActionLog(p => [...p, text]);
     setIsLoading(true);
+    setChoices(null);
 
     const nh = [...history, { role: "user", content: text }];
     const th = nh.length <= 14 ? nh : [...nh.slice(0, 2), ...nh.slice(-12)];
@@ -283,15 +264,16 @@ function App() {
     try {
       const data = await callAPI(SYS, th);
       const raw = data.content.map(c => c.type === "text" ? c.text : "").filter(Boolean).join("\n");
-      let p;
-      try {
-        p = JSON.parse(raw.replace(/```json\s*/g, "").replace(/```/g, "").trim());
-      } catch {
-        p = { narrative: raw || "...", situation: "", sceneNumber: scenes.filter(s => s.type === "scene").length + 1, isEnding: false };
-      }
+      const p = parseJSON(raw) || { narrative: raw || "...", situation: "", sceneNumber: scenes.filter(s => s.type === "scene").length + 1, isEnding: false, choiceA: "", choiceB: "" };
       setScenes(prev => [...prev, { type: "scene", text: p.narrative, sceneNumber: p.sceneNumber, situation: p.situation }]);
       setHistory([...nh, { role: "assistant", content: JSON.stringify(p) }]);
-      if (p.isEnding) setEnding({ title: p.endingTitle || "結末", summary: p.endingSummary || "" });
+      if (p.isEnding) {
+        setEnding({ title: p.endingTitle || "結末", summary: p.endingSummary || "" });
+        setChoices(null);
+      } else {
+        setChoices(p.choiceA && p.choiceB ? { a: p.choiceA, b: p.choiceB } : null);
+        setChallengePhase("idle");
+      }
     } catch (err) {
       setScenes(prev => [...prev, { type: "scene", text: "（エラー: " + err.message + "）", sceneNumber: -1 }]);
     }
@@ -299,41 +281,27 @@ function App() {
     submittingRef.current = false;
   };
 
-  const submitAction = () => {
-    if (!userInput.trim() || isLoading || submittingRef.current) return;
-    submittingRef.current = true;
+  // Manual text/voice submit (fallback)
+  const startListening = () => {
+    if (isLoading || submittingRef.current) return;
     killMic();
-    doSubmit(userInput.trim());
+    const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+    if (!SR) return;
+    try {
+      const r = new SR(); r.lang = "ja-JP"; r.interimResults = true; r.continuous = false; recRef.current = r;
+      r.onresult = (e) => { const t = Array.from(e.results).map(x => x[0].transcript).join(""); setUserInput(t); if (e.results[e.results.length-1].isFinal) { killMic(); if (!submittingRef.current) { submittingRef.current = true; doSubmitChoice(t); } } };
+      r.onerror = (e) => { killMic(); };
+      r.onend = () => setIsListening(false);
+      r.start(); setIsListening(true);
+    } catch(e) {}
   };
 
-  const onKey = (e) => {
-    if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing) { e.preventDefault(); submitAction(); }
-  };
+  const submitAction = () => { if (!userInput.trim() || isLoading || submittingRef.current) return; submittingRef.current = true; killMic(); doSubmitChoice(userInput.trim()); };
+  const onKey = (e) => { if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing) { e.preventDefault(); submitAction(); } };
 
-  const ctr = {
-    height: viewH,
-    background: "linear-gradient(180deg,#0d0d1a 0%,#141428 50%,#0d0d1a 100%)",
-    display: "flex", justifyContent: "center", alignItems: "flex-start",
-    padding: "12px 12px 0", overflow: "hidden",
-  };
-  const card = {
-    width: "100%", maxWidth: 480, height: "100%",
-    background: "linear-gradient(165deg,#181830 0%,#12122a 100%)",
-    borderRadius: "24px 24px 0 0", border: "1px solid #2a2a44", borderBottom: "none",
-    boxShadow: "0 20px 60px #00000066",
-    padding: "20px 18px 0",
-    opacity: fadeIn ? 1 : 0, transform: fadeIn ? "translateY(0)" : "translateY(12px)",
-    transition: "opacity 0.4s,transform 0.4s",
-    display: "flex", flexDirection: "column", overflow: "hidden",
-  };
-
-  const chipStyle = (selected) => ({
-    padding: "8px 14px", border: "none", borderRadius: 10,
-    background: selected ? "#64dfdf22" : "transparent",
-    outline: selected ? "1.5px solid #64dfdf66" : "1.5px solid #2a2a42",
-    color: selected ? "#64dfdf" : "#6a6a7a",
-    fontSize: 13, cursor: "pointer", transition: "all 0.15s",
-  });
+  const ctr = { height: viewH, background: "linear-gradient(180deg,#0d0d1a 0%,#141428 50%,#0d0d1a 100%)", display: "flex", justifyContent: "center", alignItems: "flex-start", padding: "8px 8px 0", overflow: "hidden" };
+  const card = { width: "100%", maxWidth: 500, height: "100%", background: "linear-gradient(165deg,#181830 0%,#12122a 100%)", borderRadius: "20px 20px 0 0", border: "1px solid #2a2a44", borderBottom: "none", padding: "16px 16px 0", opacity: fadeIn ? 1 : 0, transform: fadeIn ? "translateY(0)" : "translateY(12px)", transition: "opacity 0.4s,transform 0.4s", display: "flex", flexDirection: "column", overflow: "hidden" };
+  const chip = (sel) => ({ padding: "10px 16px", border: "none", borderRadius: 10, background: sel ? "#64dfdf22" : "transparent", outline: sel ? "1.5px solid #64dfdf66" : "1.5px solid #2a2a42", color: sel ? "#64dfdf" : "#7a7a8a", fontSize: 15, fontWeight: sel ? 600 : 400, cursor: "pointer" });
 
   return (
     <div style={ctr}>
@@ -342,100 +310,74 @@ function App() {
         {/* SETUP */}
         {phase === "setup" && (
           <div style={{ textAlign: "center", animation: "slideUp 0.6s ease", overflowY: "auto", flex: 1, paddingBottom: 20 }}>
-            <div style={{ ...mf, fontSize: 11, color: "#64dfdf", letterSpacing: 4, marginBottom: 16 }}>STILLNOVA STUDIO</div>
-            <h1 style={{ ...tf, fontSize: 32, color: "#e8e8f0", marginBottom: 24 }}>Brain Story 2sec</h1>
+            <div style={{ ...mf, fontSize: 12, color: "#64dfdf", letterSpacing: 4, marginBottom: 16 }}>STILLNOVA STUDIO</div>
+            <h1 style={{ fontSize: 28, color: "#e8e8f0", fontWeight: 700, marginBottom: 24 }}>Brain Story 2sec</h1>
             <div style={{ background: "#1a1a2e", borderRadius: 16, padding: 20, border: "1px solid #2a2a42", textAlign: "left" }}>
-              <div style={{ ...mf, fontSize: 11, color: "#64dfdf", marginBottom: 10 }}>API KEY</div>
-              <p style={{ fontSize: 12, color: "#6a6a7a", lineHeight: 1.7, marginBottom: 12 }}>
-                Claude APIキーを入力してください。この端末のみに保存されます。
-              </p>
+              <div style={{ ...mf, fontSize: 12, color: "#64dfdf", marginBottom: 10 }}>API KEY</div>
+              <p style={{ fontSize: 14, color: "#7a7a8a", lineHeight: 1.7, marginBottom: 12 }}>Claude APIキーを入力してください。</p>
               <input type="password" value={keyInput} onChange={e => setKeyInput(e.target.value)} placeholder="sk-ant-..."
-                style={{ width: "100%", padding: "12px 16px", background: "#12122a", border: "1.5px solid #2a2a42", borderRadius: 12, color: "#d4d4e0", fontSize: 16, marginBottom: 12 }}
-              />
-              <button onClick={saveKey} style={{ width: "100%", padding: 14, border: "none", borderRadius: 14, background: keyInput.trim() ? "linear-gradient(135deg,#64dfdf,#4ab8b8)" : "#2a2a42", color: keyInput.trim() ? "#0d0d1a" : "#5a5a6a", fontSize: 15, fontWeight: 700, cursor: keyInput.trim() ? "pointer" : "default" }}>
-                はじめる
-              </button>
+                style={{ width: "100%", padding: "14px 16px", background: "#12122a", border: "1.5px solid #2a2a42", borderRadius: 12, color: "#d4d4e0", fontSize: 16, marginBottom: 12 }} />
+              <button onClick={saveKey} style={{ width: "100%", padding: 16, border: "none", borderRadius: 14, background: keyInput.trim() ? "linear-gradient(135deg,#64dfdf,#4ab8b8)" : "#2a2a42", color: keyInput.trim() ? "#0d0d1a" : "#5a5a6a", fontSize: 16, fontWeight: 700, cursor: keyInput.trim() ? "pointer" : "default" }}>はじめる</button>
             </div>
           </div>
         )}
 
-        {/* TITLE — ストーリー生成 */}
+        {/* TITLE */}
         {phase === "title" && (
           <div style={{ textAlign: "center", animation: "slideUp 0.6s ease", overflowY: "auto", flex: 1, paddingBottom: 20 }}>
-            <div style={{ ...mf, fontSize: 11, color: "#64dfdf", letterSpacing: 4, marginBottom: 12 }}>STILLNOVA STUDIO</div>
-            <h1 style={{ ...tf, fontSize: 32, color: "#e8e8f0", lineHeight: 1.3, marginBottom: 4 }}>Brain Story</h1>
-            <div style={{ ...mf, fontSize: 20, color: "#64dfdf", marginBottom: 16, letterSpacing: 2 }}>2<span style={{ fontSize: 13, verticalAlign: "super" }}>sec</span></div>
+            <div style={{ ...mf, fontSize: 12, color: "#64dfdf", letterSpacing: 4, marginBottom: 10 }}>STILLNOVA STUDIO</div>
+            <h1 style={{ fontSize: 28, color: "#e8e8f0", fontWeight: 700, marginBottom: 2 }}>Brain Story</h1>
+            <div style={{ ...mf, fontSize: 22, color: "#64dfdf", marginBottom: 14, letterSpacing: 2 }}>2<span style={{ fontSize: 14, verticalAlign: "super" }}>sec</span></div>
 
-            {/* 主人公 */}
-            <div style={{ background: "#1a1a2e", borderRadius: 16, padding: "16px 16px", marginBottom: 10, border: "1px solid #2a2a42", textAlign: "left" }}>
-              <div style={{ ...mf, fontSize: 11, color: "#64dfdf", marginBottom: 10 }}>主人公</div>
+            <div style={{ background: "#1a1a2e", borderRadius: 16, padding: "14px 14px", marginBottom: 8, border: "1px solid #2a2a42", textAlign: "left" }}>
+              <div style={{ ...mf, fontSize: 12, color: "#64dfdf", marginBottom: 8 }}>主人公</div>
               <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
-                {PROTAGONISTS.map(p => (
-                  <button key={p.id} onClick={() => setSelProtag(p.id)} style={chipStyle(selProtag === p.id)}>{p.label}</button>
-                ))}
+                {PROTAGS.map(p => <button key={p.id} onClick={() => setSelP(p.id)} style={chip(selP === p.id)}>{p.label}</button>)}
               </div>
             </div>
 
-            {/* ジャンル */}
-            <div style={{ background: "#1a1a2e", borderRadius: 16, padding: "16px 16px", marginBottom: 10, border: "1px solid #2a2a42", textAlign: "left" }}>
-              <div style={{ ...mf, fontSize: 11, color: "#64dfdf", marginBottom: 10 }}>ジャンル</div>
+            <div style={{ background: "#1a1a2e", borderRadius: 16, padding: "14px 14px", marginBottom: 8, border: "1px solid #2a2a42", textAlign: "left" }}>
+              <div style={{ ...mf, fontSize: 12, color: "#64dfdf", marginBottom: 8 }}>ジャンル</div>
               <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
-                {GENRES.map(g => (
-                  <button key={g.id} onClick={() => setSelGenre(g.id)} style={chipStyle(selGenre === g.id)}>{g.label}</button>
-                ))}
+                {GENRES.map(g => <button key={g.id} onClick={() => setSelG(g.id)} style={chip(selG === g.id)}>{g.label}</button>)}
               </div>
             </div>
 
-            {/* 気分 */}
-            <div style={{ background: "#1a1a2e", borderRadius: 16, padding: "16px 16px", marginBottom: 16, border: "1px solid #2a2a42", textAlign: "left" }}>
-              <div style={{ ...mf, fontSize: 11, color: "#64dfdf", marginBottom: 10 }}>気分</div>
+            <div style={{ background: "#1a1a2e", borderRadius: 16, padding: "14px 14px", marginBottom: 14, border: "1px solid #2a2a42", textAlign: "left" }}>
+              <div style={{ ...mf, fontSize: 12, color: "#64dfdf", marginBottom: 8 }}>気分</div>
               <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
-                {MOODS.map(m => (
-                  <button key={m.id} onClick={() => setSelMood(m.id)} style={chipStyle(selMood === m.id)}>{m.label}</button>
-                ))}
+                {MOODS.map(m => <button key={m.id} onClick={() => setSelM(m.id)} style={chip(selM === m.id)}>{m.label}</button>)}
               </div>
             </div>
 
-            {/* 生成ボタン */}
-            <button
-              onClick={generateStory}
-              disabled={isGenerating}
-              style={{
-                width: "100%", padding: 16, border: "none", borderRadius: 14,
-                background: isGenerating ? "#2a2a42" : "linear-gradient(135deg,#64dfdf,#4ab8b8)",
-                color: isGenerating ? "#5a5a6a" : "#0d0d1a",
-                fontSize: 16, fontWeight: 700, cursor: isGenerating ? "default" : "pointer",
-                letterSpacing: 1, marginBottom: 10,
-              }}
-            >
-              {isGenerating ? "ストーリー生成中..." : "物語をはじめる"}
+            <button onClick={genStory} disabled={isGen}
+              style={{ width: "100%", padding: 16, border: "none", borderRadius: 14, background: isGen ? "#2a2a42" : "linear-gradient(135deg,#64dfdf,#4ab8b8)", color: isGen ? "#5a5a6a" : "#0d0d1a", fontSize: 17, fontWeight: 700, cursor: isGen ? "default" : "pointer", marginBottom: 8 }}>
+              {isGen ? "生成中..." : "物語をはじめる"}
             </button>
-
-            <p style={{ fontSize: 11, color: "#4a4a5a", marginBottom: 6 }}>AIが毎回違う物語を生成します</p>
-            <button onClick={() => { localStorage.removeItem("bs2_key"); setApiKey(""); setPhase("setup"); }} style={{ background: "none", border: "none", color: "#3a3a52", fontSize: 11, cursor: "pointer" }}>APIキーを変更</button>
+            <p style={{ fontSize: 13, color: "#5a5a6a", marginBottom: 4 }}>毎回AIが違う物語を作ります</p>
+            <button onClick={() => { localStorage.removeItem("bs2_key"); setApiKey(""); setPhase("setup"); }} style={{ background: "none", border: "none", color: "#3a3a52", fontSize: 12, cursor: "pointer" }}>APIキーを変更</button>
           </div>
         )}
 
         {/* PLAYING */}
         {phase === "playing" && scenario && (
           <>
-            <div style={{ marginBottom: 10, flexShrink: 0, display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-              <span style={{ ...mf, fontSize: 11, color: "#64dfdf", letterSpacing: 3 }}>{scenario.genre} — {scenario.title}</span>
-              <span style={{ ...mf, fontSize: 11, color: "#5a5a6a" }}>SCENE {scenes.filter(s => s.type === "scene").length}</span>
+            <div style={{ marginBottom: 8, flexShrink: 0, display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+              <span style={{ ...mf, fontSize: 12, color: "#64dfdf", letterSpacing: 2 }}>{scenario.genre} — {scenario.title}</span>
+              <span style={{ ...mf, fontSize: 12, color: "#5a5a6a" }}>SCENE {scenes.filter(s => s.type === "scene").length}</span>
             </div>
 
-            <div ref={scrollRef} style={{ flex: 1, overflowY: "auto", marginBottom: 10, paddingRight: 4, minHeight: 0 }}>
+            <div ref={scrollRef} style={{ flex: 1, overflowY: "auto", marginBottom: 8, paddingRight: 4, minHeight: 0 }}>
               {scenes.map((s, i) => (
-                <div key={i} style={{ marginBottom: 16, animation: i === scenes.length - 1 ? "slideUp 0.5s ease" : "none" }}>
+                <div key={i} style={{ marginBottom: 14, animation: i === scenes.length - 1 ? "slideUp 0.4s ease" : "none" }}>
                   {s.type === "scene" ? (
                     <div>
-                      {s.situation && <div style={{ fontSize: 11, color: "#64dfdf88", marginBottom: 6, ...mf }}>{s.situation}</div>}
-                      <p style={{ fontSize: 14, color: "#d4d4e0", lineHeight: 2, whiteSpace: "pre-wrap" }}>{s.text}</p>
+                      {s.situation && <div style={{ fontSize: 13, color: "#64dfdf88", marginBottom: 4, ...mf }}>{s.situation}</div>}
+                      <p style={{ fontSize: 17, color: "#e0e0ec", lineHeight: 1.9, whiteSpace: "pre-wrap" }}>{s.text}</p>
                     </div>
                   ) : (
-                    <div style={{ padding: "10px 16px", marginLeft: 24, background: "linear-gradient(135deg,#64dfdf12,#64dfdf08)", border: "1px solid #64dfdf33", borderRadius: 12 }}>
-                      <span style={{ fontSize: 11, color: "#64dfdf88", ...mf }}>あなた：</span>
-                      <p style={{ fontSize: 14, color: "#e8e8f0", lineHeight: 1.7, marginTop: 4 }}>{s.text}</p>
+                    <div style={{ padding: "10px 14px", marginLeft: 16, background: "#64dfdf10", border: "1px solid #64dfdf33", borderRadius: 12 }}>
+                      <p style={{ fontSize: 16, color: "#e8e8f0", lineHeight: 1.6 }}>{s.text}</p>
                     </div>
                   )}
                 </div>
@@ -443,38 +385,83 @@ function App() {
               {isLoading && (
                 <div style={{ padding: "12px 0", display: "flex", alignItems: "center", gap: 8 }}>
                   <div style={{ display: "flex", gap: 4 }}>
-                    {[0,1,2].map(i => <div key={i} style={{ width: 6, height: 6, borderRadius: "50%", background: "#64dfdf", animation: `breathe 1.2s ${i*0.3}s infinite` }} />)}
+                    {[0,1,2].map(i => <div key={i} style={{ width: 7, height: 7, borderRadius: "50%", background: "#64dfdf", animation: `breathe 1.2s ${i*0.3}s infinite` }} />)}
                   </div>
-                  <span style={{ fontSize: 12, color: "#5a5a6a" }}>物語が展開中...</span>
+                  <span style={{ fontSize: 14, color: "#5a5a6a" }}>展開中...</span>
                 </div>
               )}
             </div>
 
+            {/* Bottom area */}
             {!ending ? (
               <div style={{ flexShrink: 0, paddingBottom: 8 }}>
-                <div style={{ display: "flex", gap: 8, alignItems: "flex-end" }}>
-                  <button onClick={isListening ? killMic : startListening} disabled={isLoading || submittingRef.current}
-                    style={{ width: 48, height: 44, border: "none", borderRadius: 14, background: isListening ? "linear-gradient(135deg,#ff4757,#ff6b6b)" : "linear-gradient(135deg,#2a2a42,#1e1e32)", color: isListening ? "#fff" : "#8a8a9a", fontSize: 20, cursor: isLoading ? "default" : "pointer", flexShrink: 0, display: "flex", alignItems: "center", justifyContent: "center", opacity: isLoading ? 0.4 : 1, animation: isListening ? "pulse 1s infinite" : "none" }}>
-                    🎤
+                {/* 2sec Challenge UI */}
+                {choices && !isLoading && challengePhase === "idle" && (
+                  <button onClick={startChallenge}
+                    style={{ width: "100%", padding: 14, border: "none", borderRadius: 14, background: "linear-gradient(135deg,#ffd166,#ffb347)", color: "#0d0d1a", fontSize: 17, fontWeight: 700, cursor: "pointer", marginBottom: 8, letterSpacing: 1 }}>
+                    2秒チャレンジ 🎤
                   </button>
-                  <input ref={inputRef} type="text" value={userInput} onChange={e => setUserInput(e.target.value)} onKeyDown={onKey}
-                    placeholder={isListening ? "聞き取り中..." : "行動を入力 or 🎤"} disabled={isLoading}
-                    style={{ flex: 1, padding: "10px 14px", background: "#1a1a2e", border: isListening ? "1.5px solid #ff475766" : "1.5px solid #2a2a42", borderRadius: 14, color: "#d4d4e0", fontSize: 16, lineHeight: 1.5, opacity: isLoading ? 0.4 : 1, WebkitAppearance: "none" }}
-                  />
-                  <button onClick={submitAction} disabled={!userInput.trim() || isLoading || submittingRef.current}
-                    style={{ padding: "10px 16px", border: "none", borderRadius: 14, background: userInput.trim() && !isLoading ? "linear-gradient(135deg,#64dfdf,#4ab8b8)" : "#2a2a42", color: userInput.trim() && !isLoading ? "#0d0d1a" : "#5a5a6a", fontSize: 14, fontWeight: 700, cursor: userInput.trim() && !isLoading ? "pointer" : "default", flexShrink: 0, height: 44 }}>→</button>
-                </div>
+                )}
+
+                {/* Countdown: show choices */}
+                {challengePhase === "countdown" && choices && (
+                  <div style={{ animation: "slideUp 0.3s ease", marginBottom: 8 }}>
+                    <div style={{ display: "flex", gap: 8, marginBottom: 6 }}>
+                      <div style={{ flex: 1, padding: 14, background: "#1a1a2e", border: "1.5px solid #64dfdf44", borderRadius: 12, textAlign: "center" }}>
+                        <span style={{ fontSize: 12, color: "#64dfdf88", ...mf }}>A</span>
+                        <p style={{ fontSize: 17, color: "#e8e8f0", fontWeight: 600, marginTop: 4 }}>{choices.a}</p>
+                      </div>
+                      <div style={{ flex: 1, padding: 14, background: "#1a1a2e", border: "1.5px solid #ffd16644", borderRadius: 12, textAlign: "center" }}>
+                        <span style={{ fontSize: 12, color: "#ffd16688", ...mf }}>B</span>
+                        <p style={{ fontSize: 17, color: "#e8e8f0", fontWeight: 600, marginTop: 4 }}>{choices.b}</p>
+                      </div>
+                    </div>
+                    <div style={{ height: 4, background: "#2a2a42", borderRadius: 2, overflow: "hidden" }}>
+                      <div style={{ height: "100%", background: "linear-gradient(90deg,#64dfdf,#ffd166)", animation: "countdown 2s linear forwards", borderRadius: 2 }} />
+                    </div>
+                    <p style={{ fontSize: 14, color: "#ffd166", textAlign: "center", marginTop: 6, ...mf }}>覚えて...まもなく音声入力スタート</p>
+                  </div>
+                )}
+
+                {/* Listening */}
+                {challengePhase === "listening" && (
+                  <div style={{ textAlign: "center", padding: "14px 0", animation: "slideUp 0.2s ease", marginBottom: 8 }}>
+                    <div style={{ fontSize: 28, animation: "pulse 0.6s infinite", marginBottom: 4 }}>🎤</div>
+                    <p style={{ fontSize: 17, color: "#ff4757", fontWeight: 700, ...mf }}>今すぐ答えて！</p>
+                    <div style={{ height: 4, background: "#2a2a42", borderRadius: 2, overflow: "hidden", marginTop: 8 }}>
+                      <div style={{ height: "100%", background: "#ff4757", animation: "countdown 2.5s linear forwards", borderRadius: 2 }} />
+                    </div>
+                  </div>
+                )}
+
+                {/* Manual input (always available) */}
+                {challengePhase !== "countdown" && challengePhase !== "listening" && (
+                  <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
+                    <button onClick={isListening ? killMic : startListening} disabled={isLoading}
+                      style={{ width: 44, height: 44, border: "none", borderRadius: 12, background: isListening ? "linear-gradient(135deg,#ff4757,#ff6b6b)" : "#1e1e32", color: isListening ? "#fff" : "#6a6a7a", fontSize: 18, cursor: "pointer", flexShrink: 0, display: "flex", alignItems: "center", justifyContent: "center", opacity: isLoading ? 0.4 : 1, animation: isListening ? "pulse 1s infinite" : "none" }}>🎤</button>
+                    <input ref={inputRef} type="text" value={userInput} onChange={e => setUserInput(e.target.value)} onKeyDown={onKey}
+                      placeholder="自由に入力もOK" disabled={isLoading}
+                      style={{ flex: 1, padding: "10px 14px", background: "#1a1a2e", border: "1.5px solid #2a2a42", borderRadius: 12, color: "#d4d4e0", fontSize: 16, lineHeight: 1.4, opacity: isLoading ? 0.4 : 1 }} />
+                    <button onClick={submitAction} disabled={!userInput.trim() || isLoading}
+                      style={{ padding: "10px 14px", border: "none", borderRadius: 12, background: userInput.trim() && !isLoading ? "linear-gradient(135deg,#64dfdf,#4ab8b8)" : "#2a2a42", color: userInput.trim() ? "#0d0d1a" : "#5a5a6a", fontSize: 15, fontWeight: 700, cursor: userInput.trim() ? "pointer" : "default", flexShrink: 0, height: 44 }}>→</button>
+                  </div>
+                )}
               </div>
             ) : (
               <div style={{ flexShrink: 0, animation: "slideUp 0.5s ease", paddingBottom: 8 }}>
-                <div style={{ background: "#1a1a2e", borderRadius: 16, padding: 16, border: "1px solid #64dfdf33", marginBottom: 10 }}>
-                  <div style={{ ...mf, fontSize: 10, color: "#64dfdf", letterSpacing: 3, marginBottom: 6 }}>ENDING</div>
-                  <div style={{ ...tf, fontSize: 18, color: "#e8e8f0", marginBottom: 8, lineHeight: 1.4 }}>{ending.title}</div>
-                  <p style={{ fontSize: 13, color: "#a0a0b0", lineHeight: 1.8 }}>{ending.summary}</p>
+                <div style={{ background: "#1a1a2e", borderRadius: 14, padding: 14, border: "1px solid #64dfdf33", marginBottom: 10 }}>
+                  <div style={{ ...mf, fontSize: 11, color: "#64dfdf", letterSpacing: 3, marginBottom: 6 }}>ENDING</div>
+                  <div style={{ fontSize: 20, color: "#e8e8f0", fontWeight: 700, marginBottom: 8, lineHeight: 1.4 }}>{ending.title}</div>
+                  <p style={{ fontSize: 15, color: "#a0a0b0", lineHeight: 1.8 }}>{ending.summary}</p>
+                  {totalChoices > 0 && (
+                    <div style={{ marginTop: 10, padding: "8px 12px", background: "#12122a", borderRadius: 10, display: "flex", gap: 12, justifyContent: "center" }}>
+                      <span style={{ ...mf, fontSize: 14, color: "#ffd166" }}>即断 {instantCount}/{totalChoices}</span>
+                    </div>
+                  )}
                 </div>
                 <div style={{ display: "flex", gap: 8 }}>
-                  <button onClick={() => { killMic(); fade(); setPhase("ending"); }} style={{ flex: 1, padding: 12, border: "none", borderRadius: 14, background: "linear-gradient(135deg,#64dfdf,#4ab8b8)", color: "#0d0d1a", fontSize: 14, fontWeight: 700, cursor: "pointer" }}>振り返り</button>
-                  <button onClick={() => { killMic(); fade(); setPhase("title"); }} style={{ flex: 1, padding: 12, border: "1.5px solid #3a3a52", borderRadius: 14, background: "transparent", color: "#8a8a9a", fontSize: 14, cursor: "pointer" }}>別の物語へ</button>
+                  <button onClick={() => { killMic(); fade(); setPhase("ending"); }} style={{ flex: 1, padding: 14, border: "none", borderRadius: 14, background: "linear-gradient(135deg,#64dfdf,#4ab8b8)", color: "#0d0d1a", fontSize: 15, fontWeight: 700, cursor: "pointer" }}>振り返り</button>
+                  <button onClick={() => { killMic(); fade(); setPhase("title"); }} style={{ flex: 1, padding: 14, border: "1.5px solid #3a3a52", borderRadius: 14, background: "transparent", color: "#8a8a9a", fontSize: 15, cursor: "pointer" }}>次の物語</button>
                 </div>
               </div>
             )}
@@ -484,39 +471,35 @@ function App() {
         {/* ENDING */}
         {phase === "ending" && ending && scenario && (
           <div style={{ animation: "slideUp 0.6s ease", overflowY: "auto", flex: 1, paddingBottom: 20 }}>
-            <div style={{ ...mf, fontSize: 11, color: "#64dfdf", letterSpacing: 3, marginBottom: 24, textAlign: "center" }}>ENDING</div>
-            <div style={{ ...tf, fontSize: 26, color: "#e8e8f0", marginBottom: 20, lineHeight: 1.4, textAlign: "center" }}>{ending.title}</div>
-            <p style={{ fontSize: 15, color: "#a0a0b0", lineHeight: 2, marginBottom: 20, textAlign: "left" }}>{ending.summary}</p>
+            <div style={{ ...mf, fontSize: 12, color: "#64dfdf", letterSpacing: 3, marginBottom: 20, textAlign: "center" }}>ENDING</div>
+            <div style={{ fontSize: 24, color: "#e8e8f0", fontWeight: 700, marginBottom: 16, lineHeight: 1.4, textAlign: "center" }}>{ending.title}</div>
+            <p style={{ fontSize: 16, color: "#a0a0b0", lineHeight: 2, marginBottom: 16 }}>{ending.summary}</p>
 
-            <div style={{ background: "#1a1a2e", borderRadius: 16, padding: 18, marginBottom: 16, border: "1px solid #2a2a42", textAlign: "left", maxHeight: 400, overflowY: "auto" }}>
-              <div style={{ ...mf, fontSize: 11, color: "#64dfdf", letterSpacing: 2, marginBottom: 14 }}>FULL STORY</div>
-              <p style={{ fontSize: 13, color: "#8a8a9a", lineHeight: 1.9, marginBottom: 12, whiteSpace: "pre-wrap" }}>{scenario.firstScene}</p>
+            {totalChoices > 0 && (
+              <div style={{ background: "#1a1a2e", borderRadius: 14, padding: 16, marginBottom: 16, border: "1px solid #ffd16633", textAlign: "center" }}>
+                <div style={{ ...mf, fontSize: 12, color: "#ffd166", marginBottom: 8 }}>2SEC CHALLENGE</div>
+                <div style={{ fontSize: 32, color: "#ffd166", fontWeight: 700, ...mf }}>{instantCount}/{totalChoices}</div>
+                <p style={{ fontSize: 14, color: "#7a7a8a", marginTop: 4 }}>回の即断に成功</p>
+              </div>
+            )}
+
+            <div style={{ background: "#1a1a2e", borderRadius: 14, padding: 16, marginBottom: 14, border: "1px solid #2a2a42", maxHeight: 350, overflowY: "auto" }}>
+              <div style={{ ...mf, fontSize: 12, color: "#64dfdf", letterSpacing: 2, marginBottom: 12 }}>FULL STORY</div>
+              <p style={{ fontSize: 15, color: "#8a8a9a", lineHeight: 1.8, marginBottom: 10, whiteSpace: "pre-wrap" }}>{scenario.firstScene}</p>
               {scenes.slice(1).map((s, i) => (
-                <div key={i} style={{ marginBottom: 12 }}>
+                <div key={i} style={{ marginBottom: 10 }}>
                   {s.type === "action" ? (
-                    <div style={{ padding: "8px 12px", marginLeft: 16, background: "#64dfdf08", border: "1px solid #64dfdf22", borderRadius: 10 }}>
-                      <span style={{ fontSize: 11, color: "#64dfdf88", ...mf }}>▸ </span>
-                      <span style={{ fontSize: 13, color: "#c4c4d0" }}>{s.text}</span>
+                    <div style={{ padding: "6px 10px", marginLeft: 12, background: "#64dfdf08", border: "1px solid #64dfdf22", borderRadius: 8 }}>
+                      <span style={{ fontSize: 14, color: "#c4c4d0" }}>{s.text}</span>
                     </div>
                   ) : (
-                    <p style={{ fontSize: 13, color: "#8a8a9a", lineHeight: 1.9, whiteSpace: "pre-wrap" }}>{s.text}</p>
+                    <p style={{ fontSize: 14, color: "#8a8a9a", lineHeight: 1.8, whiteSpace: "pre-wrap" }}>{s.text}</p>
                   )}
                 </div>
               ))}
             </div>
 
-            <div style={{ background: "#1a1a2e", borderRadius: 16, padding: 18, marginBottom: 24, border: "1px solid #2a2a42", textAlign: "left" }}>
-              <div style={{ ...mf, fontSize: 11, color: "#ffd166", letterSpacing: 2, marginBottom: 12 }}>YOUR ACTIONS</div>
-              {actionLog.map((a, i) => (
-                <div key={i} style={{ display: "flex", gap: 10, padding: "8px 0", borderBottom: i < actionLog.length - 1 ? "1px solid #22223a" : "none" }}>
-                  <span style={{ ...mf, fontSize: 11, color: "#5a5a6a", width: 20, flexShrink: 0 }}>{i + 1}</span>
-                  <span style={{ fontSize: 13, color: "#a0a0b0", lineHeight: 1.6 }}>{a}</span>
-                </div>
-              ))}
-            </div>
-
-            <button onClick={() => { fade(); setPhase("title"); }} style={{ width: "100%", padding: 16, border: "none", borderRadius: 14, background: "linear-gradient(135deg,#64dfdf,#4ab8b8)", color: "#0d0d1a", fontSize: 16, fontWeight: 700, cursor: "pointer", letterSpacing: 1, marginBottom: 8 }}>新しい物語をはじめる</button>
-            <p style={{ fontSize: 11, color: "#5a5a6a", textAlign: "center" }}>条件を変えれば全く違う物語が生まれます</p>
+            <button onClick={() => { fade(); setPhase("title"); }} style={{ width: "100%", padding: 16, border: "none", borderRadius: 14, background: "linear-gradient(135deg,#64dfdf,#4ab8b8)", color: "#0d0d1a", fontSize: 17, fontWeight: 700, cursor: "pointer", marginBottom: 8 }}>新しい物語をはじめる</button>
           </div>
         )}
 
