@@ -1,4 +1,5 @@
 <!DOCTYPE html>
+
 <html lang="ja">
 <head>
 <meta charset="UTF-8">
@@ -9,7 +10,7 @@
 <style>
   *{box-sizing:border-box;margin:0;padding:0}
   html{height:100%;overflow:hidden}
-  body{background:#0d0d1a;font-family:'Noto Sans JP',sans-serif;height:100%;overflow:hidden}
+  body{background:#141210;font-family:'Noto Sans JP',sans-serif;height:100%;overflow:hidden}
   button,input{font-family:inherit;-webkit-appearance:none}
   button:focus,input:focus{outline:none}
   input[type="text"]{font-size:16px!important}
@@ -17,9 +18,10 @@
   @keyframes breathe{0%,100%{opacity:.4}50%{opacity:.8}}
   @keyframes pulse{0%,100%{transform:scale(1)}50%{transform:scale(1.12)}}
   @keyframes countdown5{from{width:100%}to{width:0%}}
+  @keyframes countPop{0%{transform:scale(0.5);opacity:0}50%{transform:scale(1.3);opacity:1}100%{transform:scale(1);opacity:1}}
   ::-webkit-scrollbar{width:4px}
   ::-webkit-scrollbar-track{background:transparent}
-  ::-webkit-scrollbar-thumb{background:#2a2a44;border-radius:2px}
+  ::-webkit-scrollbar-thumb{background:#3a3028;border-radius:2px}
   #root{height:100%}
 </style>
 </head>
@@ -31,12 +33,25 @@
 <script type="text/babel">
 const {useState,useRef,useEffect,useCallback}=React;
 
+// === COLORS ===
+const C={
+bg:”#141210”,bg2:”#1c1a16”,card:”#1e1c17”,card2:”#18160f”,
+border:”#2e2a22”,border2:”#3a3428”,
+accent:”#f0a050”,accentDim:”#f0a05044”,accentBg:”#f0a05018”,
+warm:”#e8d5b0”,warmDim:”#e8d5b066”,
+text:”#e8e0d4”,textSub:”#8a8070”,textMuted:”#5a5248”,
+danger:”#d45”,
+green:”#6bba6b”,
+countBar1:”#f0a050”,countBar2:”#d45”,
+};
+
 const SYS=`あなたはインタラクティブストーリーのゲームマスターです。
 
 必ず以下のJSON形式のみで返答。JSON以外は出力禁止。絵文字・特殊記号は禁止。
-{"narrative":"場面の描写","situation":"状況1文","sceneNumber":1,"isEnding":false,"endingTitle":"","endingSummary":""}
+{“narrative”:“場面の描写”,“situation”:“状況1文”,“sceneNumber”:1,“isEnding”:false,“endingTitle”:””,“endingSummary”:””}
 
 # 文体（最重要）
+
 - 小学校高学年が読めるやさしい日本語
 - 1文は短く。40文字以内
 - 難しい言葉、比喩は禁止
@@ -45,6 +60,7 @@ const SYS=`あなたはインタラクティブストーリーのゲームマス
 - isEnding=trueの場合のみ「あなたならどうする？」は不要
 
 # 入力の解釈
+
 - どんな回答もできるだけ物語に反映する
 - ふざけた回答→ユーモアで処理して進める
 - 曖昧な回答→主人公が少し迷いつつ行動する描写にする
@@ -52,16 +68,19 @@ const SYS=`あなたはインタラクティブストーリーのゲームマス
 - 「時間切れ」「迷った」「聞き取れなかった」→主人公が迷っている間に状況が変わる描写にして物語を前に進める。同じ場面を繰り返してはいけない
 
 # 絶対禁止
+
 - 前の場面と同じ内容・同じ描写を繰り返すこと
 - 物語が止まること。どんな入力でも必ず新しい展開にすること
 
 # 物語
+
 - scene 1の物や人が後で重要になるように仕込む
 - scene 2〜3で意外な展開を入れる
 - ユーザーの判断が後の場面に影響する
 - 良いことも悪いことも起きる。悪いことばかり続けない
 
 # 結末（5〜6場面）
+
 - sceneNumberは1から+1。scene 4から収束。scene 5〜6でisEnding=true。6超え禁止
 - 「あの行動がここに繋がった」と思える構成にする
 - endingSummaryは3文：振り返り、判断パターンの分析、ひとこと`;
@@ -69,394 +88,470 @@ const SYS=`あなたはインタラクティブストーリーのゲームマス
 const SGEN=`条件：主人公={p}、ジャンル={g}、気分={m}
 
 JSON形式のみ。絵文字禁止。やさしい日本語。1文40文字以内。
-{"title":"タイトル","genre":"ジャンル短縮","setting":"2文の設定。秘密かタイムリミットを含む","firstScene":"最初の場面3〜4文。最後は「あなたならどうする？」で終える"}`;
+{“title”:“タイトル”,“genre”:“ジャンル短縮”,“setting”:“2文の設定。秘密かタイムリミットを含む”,“firstScene”:“最初の場面3〜4文。最後は「あなたならどうする？」で終える”}`;
 
-const PS=[{id:"man",l:"男性"},{id:"woman",l:"女性"},{id:"child",l:"子供"},{id:"other",l:"人間以外"}];
-const GS=[{id:"work",l:"仕事"},{id:"daily",l:"日常"},{id:"mystery",l:"ミステリー"},{id:"scifi",l:"SF"},{id:"fantasy",l:"ファンタジー"},{id:"survival",l:"サバイバル"}];
-const MS=[{id:"thrill",l:"ハラハラ"},{id:"warm",l:"ほっこり"},{id:"think",l:"考えさせられる"},{id:"funny",l:"笑える"}];
-const mf={fontFamily:"'DM Mono',monospace"};
+const PS=[{id:“man”,l:“男性”},{id:“woman”,l:“女性”},{id:“child”,l:“子供”},{id:“other”,l:“人間以外”}];
+const GS=[{id:“work”,l:“仕事”},{id:“daily”,l:“日常”},{id:“mystery”,l:“ミステリー”},{id:“scifi”,l:“SF”},{id:“fantasy”,l:“ファンタジー”},{id:“survival”,l:“サバイバル”}];
+const MS=[{id:“thrill”,l:“ハラハラ”},{id:“warm”,l:“ほっこり”},{id:“think”,l:“考えさせられる”},{id:“funny”,l:“笑える”}];
+const mf={fontFamily:”‘DM Mono’,monospace”};
+
+// === BEEP SOUND ===
+let audioCtx=null;
+function beep(freq=880,dur=0.08){
+try{
+if(!audioCtx)audioCtx=new(window.AudioContext||window.webkitAudioContext)();
+const o=audioCtx.createOscillator();const g=audioCtx.createGain();
+o.connect(g);g.connect(audioCtx.destination);
+o.type=“sine”;o.frequency.value=freq;
+g.gain.setValueAtTime(0.3,audioCtx.currentTime);
+g.gain.exponentialRampToValueAtTime(0.001,audioCtx.currentTime+dur);
+o.start();o.stop(audioCtx.currentTime+dur);
+}catch(e){}
+}
 
 function App(){
-  const [apiKey,setApiKey]=useState(localStorage.getItem("bs5_key")||"");
-  const [keyIn,setKeyIn]=useState("");
-  const [phase,setPhase]=useState(apiKey?"title":"setup");
-  const [sc,setSc]=useState(null);
-  const [scenes,setScenes]=useState([]);
-  const [uIn,setUIn]=useState("");
-  const [loading,setLoading]=useState(false);
-  const [hist,setHist]=useState([]);
-  const [ending,setEnding]=useState(null);
-  const [aLog,setALog]=useState([]);
-  const [listening,setListening]=useState(false);
-  const [fi,setFi]=useState(true);
-  const [vh,setVh]=useState(window.innerHeight);
-  const [sp,setSp]=useState("man");
-  const [sg,setSg]=useState("daily");
-  const [sm,setSm]=useState("thrill");
-  const [gen,setGen]=useState(false);
-  // 5sec challenge state
-  const [challenging,setChallenging]=useState(false);
-  const [fast,setFast]=useState(0);
-  const [total,setTotal]=useState(0);
+const [apiKey,setApiKey]=useState(localStorage.getItem(“bs5_key”)||””);
+const [keyIn,setKeyIn]=useState(””);
+const [phase,setPhase]=useState(apiKey?“title”:“setup”);
+const [sc,setSc]=useState(null);
+const [scenes,setScenes]=useState([]);
+const [uIn,setUIn]=useState(””);
+const [loading,setLoading]=useState(false);
+const [hist,setHist]=useState([]);
+const [ending,setEnding]=useState(null);
+const [aLog,setALog]=useState([]);
+const [listening,setListening]=useState(false);
+const [fi,setFi]=useState(true);
+const [vh,setVh]=useState(window.innerHeight);
+const [sp,setSp]=useState(“man”);
+const [sg,setSg]=useState(“daily”);
+const [sm,setSm]=useState(“thrill”);
+const [gen,setGen]=useState(false);
+const [challenging,setChallenging]=useState(false);
+const [countNum,setCountNum]=useState(null); // 5,4,3,2,1,0
+const [fast,setFast]=useState(0);
+const [total,setTotal]=useState(0);
+const [micReady,setMicReady]=useState(false);
 
-  const iRef=useRef(null);
-  const sRef=useRef(null);
-  const rRef=useRef(null);
-  const subRef=useRef(false);
-  const ltRef=useRef(null);
-  const t0Ref=useRef(0);
+const iRef=useRef(null);
+const sRef=useRef(null);
+const rRef=useRef(null);
+const subRef=useRef(false);
+const ltRef=useRef(null);
+const countRef=useRef(null);
+const t0Ref=useRef(0);
+const uInRef=useRef(””);
 
-  const fade=()=>{setFi(false);requestAnimationFrame(()=>requestAnimationFrame(()=>setFi(true)))};
+// Keep uInRef in sync
+useEffect(()=>{uInRef.current=uIn},[uIn]);
 
-  useEffect(()=>{
-    const fn=()=>setVh(window.visualViewport?window.visualViewport.height:window.innerHeight);
-    const vv=window.visualViewport;
-    if(vv){vv.addEventListener("resize",fn);vv.addEventListener("scroll",fn)}
-    else window.addEventListener("resize",fn);
-    fn();
-    return()=>{if(vv){vv.removeEventListener("resize",fn);vv.removeEventListener("scroll",fn)}else window.removeEventListener("resize",fn)};
-  },[]);
+const fade=()=>{setFi(false);requestAnimationFrame(()=>requestAnimationFrame(()=>setFi(true)))};
 
-  useEffect(()=>{
-    if(!iRef.current)return;const el=iRef.current;
-    const ps=()=>{setTimeout(()=>window.scrollTo(0,0),50);setTimeout(()=>window.scrollTo(0,0),300)};
-    el.addEventListener("focus",ps);return()=>el.removeEventListener("focus",ps);
-  },[phase]);
+useEffect(()=>{
+const fn=()=>setVh(window.visualViewport?window.visualViewport.height:window.innerHeight);
+const vv=window.visualViewport;
+if(vv){vv.addEventListener(“resize”,fn);vv.addEventListener(“scroll”,fn)}
+else window.addEventListener(“resize”,fn);
+fn();
+return()=>{if(vv){vv.removeEventListener(“resize”,fn);vv.removeEventListener(“scroll”,fn)}else window.removeEventListener(“resize”,fn)};
+},[]);
 
-  useEffect(()=>{
-    if(sRef.current&&scenes.length>0){
-      const els=sRef.current.children;
-      if(els.length>0)els[els.length-1].scrollIntoView({behavior:"smooth",block:"start"});
-    }
-  },[scenes,loading]);
+useEffect(()=>{
+if(!iRef.current)return;const el=iRef.current;
+const ps=()=>{setTimeout(()=>window.scrollTo(0,0),50);setTimeout(()=>window.scrollTo(0,0),300)};
+el.addEventListener(“focus”,ps);return()=>el.removeEventListener(“focus”,ps);
+},[phase]);
 
-  const saveKey=()=>{if(!keyIn.trim())return;localStorage.setItem("bs5_key",keyIn.trim());setApiKey(keyIn.trim());setPhase("title")};
+useEffect(()=>{
+if(sRef.current&&scenes.length>0){
+const els=sRef.current.children;
+if(els.length>0)els[els.length-1].scrollIntoView({behavior:“smooth”,block:“start”});
+}
+},[scenes,loading]);
 
-  const stopRec=()=>{
-    if(rRef.current){try{rRef.current.abort()}catch(e){}try{rRef.current.stop()}catch(e){}rRef.current.onresult=null;rRef.current.onerror=null;rRef.current.onend=null;rRef.current=null}
-    setListening(false);clearTimeout(ltRef.current);
-  };
+const saveKey=()=>{if(!keyIn.trim())return;localStorage.setItem(“bs5_key”,keyIn.trim());setApiKey(keyIn.trim());setPhase(“title”)};
 
-  const callAPI=async(system,messages)=>{
-    const res=await fetch("/api/chat",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({apiKey,system,messages})});
-    if(!res.ok){let m="HTTP "+res.status;try{m+=": "+(await res.text()).slice(0,200)}catch(e){}throw new Error(m)}
-    return await res.json();
-  };
-  const pJ=(raw)=>{try{return JSON.parse(raw.replace(/```json\s*/g,"").replace(/```/g,"").trim())}catch{return null}};
+const stopRec=()=>{
+if(rRef.current){try{rRef.current.abort()}catch(e){}try{rRef.current.stop()}catch(e){}rRef.current.onresult=null;rRef.current.onerror=null;rRef.current.onend=null;rRef.current=null}
+setListening(false);clearTimeout(ltRef.current);clearInterval(countRef.current);
+};
 
-  // === STORY GENERATION ===
-  const genStory=async()=>{
-    setGen(true);
-    const pr=SGEN.replace("{p}",PS.find(p=>p.id===sp).l).replace("{g}",GS.find(g=>g.id===sg).l).replace("{m}",MS.find(m=>m.id===sm).l);
-    try{
-      const data=await callAPI(pr,[{role:"user",content:"ストーリーを作って。"}]);
-      const raw=data.content.map(c=>c.type==="text"?c.text:"").filter(Boolean).join("\n");
-      const s=pJ(raw);
-      if(!s)throw new Error("生成失敗。もう一度お試しください");
-      const scenario={id:"g"+Date.now(),title:s.title,genre:s.genre,setting:s.setting,firstScene:s.firstScene};
-      setSc(scenario);
-      setScenes([{type:"scene",text:scenario.firstScene,sceneNumber:0}]);
-      setHist([{role:"user",content:"設定：「"+scenario.title+"」\n"+scenario.setting+"\n\n最初の場面：\n"+scenario.firstScene+"\n\nsceneNumber=1から。了解とだけ答えて。"},{role:"assistant",content:"了解"}]);
-      setALog([]);setEnding(null);setFast(0);setTotal(0);subRef.current=false;setChallenging(false);fade();setPhase("playing");
-      // Warm up SpeechRecognition (Safari needs first-run init)
-      try{
-        const SR=window.SpeechRecognition||window.webkitSpeechRecognition;
-        if(SR){const w=new SR();w.lang="ja-JP";w.onend=()=>{};w.onerror=()=>{};w.start();setTimeout(()=>{try{w.abort()}catch(e){}},200)}
-      }catch(e){}
-    }catch(err){alert("エラー: "+err.message)}
-    setGen(false);
-  };
+const callAPI=async(system,messages)=>{
+const res=await fetch(”/api/chat”,{method:“POST”,headers:{“Content-Type”:“application/json”},body:JSON.stringify({apiKey,system,messages})});
+if(!res.ok){let m=“HTTP “+res.status;try{m+=”: “+(await res.text()).slice(0,200)}catch(e){}throw new Error(m)}
+return await res.json();
+};
+const pJ=(raw)=>{try{return JSON.parse(raw.replace(/`json\s*/g,"").replace(/`/g,””).trim())}catch{return null}};
 
-  // === SUBMIT (shared by all input methods) ===
-  const doSubmit=async(text,wasChallengeSuccess)=>{
-    if(subRef.current)return;subRef.current=true;
-    stopRec();setChallenging(false);setUIn("");
-    if(wasChallengeSuccess!==undefined){
-      setTotal(t=>t+1);
-      if(wasChallengeSuccess)setFast(f=>f+1);
-    }
-    setScenes(p=>[...p,{type:"action",text}]);
-    setALog(p=>[...p,text]);
-    setLoading(true);
+// === MIC PERMISSION STEP ===
+const requestMic=()=>{
+const SR=window.SpeechRecognition||window.webkitSpeechRecognition;
+if(!SR){setMicReady(true);setPhase(“playing”);return}
+const r=new SR();r.lang=“ja-JP”;r.interimResults=false;
+r.onend=()=>{setMicReady(true);setPhase(“playing”)};
+r.onerror=()=>{setMicReady(true);setPhase(“playing”)};
+r.start();
+setTimeout(()=>{try{r.abort()}catch(e){}},500);
+};
 
-    const nh=[...hist,{role:"user",content:text}];
-    const th=nh.length<=14?nh:[...nh.slice(0,2),...nh.slice(-12)];
-    try{
-      const data=await callAPI(SYS,th);
-      const raw=data.content.map(c=>c.type==="text"?c.text:"").filter(Boolean).join("\n");
-      const p=pJ(raw)||{narrative:raw||"...",situation:"",sceneNumber:scenes.filter(s=>s.type==="scene").length+1,isEnding:false};
-      setScenes(prev=>[...prev,{type:"scene",text:p.narrative,sceneNumber:p.sceneNumber,situation:p.situation}]);
-      setHist([...nh,{role:"assistant",content:JSON.stringify(p)}]);
-      if(p.isEnding)setEnding({title:p.endingTitle||"結末",summary:p.endingSummary||""});
-    }catch(err){setScenes(prev=>[...prev,{type:"scene",text:"（エラー: "+err.message+"）",sceneNumber:-1}])}
-    setLoading(false);subRef.current=false;
-  };
+// === STORY GENERATION ===
+const genStory=async()=>{
+setGen(true);
+const pr=SGEN.replace(”{p}”,PS.find(p=>p.id===sp).l).replace(”{g}”,GS.find(g=>g.id===sg).l).replace(”{m}”,MS.find(m=>m.id===sm).l);
+try{
+const data=await callAPI(pr,[{role:“user”,content:“ストーリーを作って。”}]);
+const raw=data.content.map(c=>c.type===“text”?c.text:””).filter(Boolean).join(”\n”);
+const s=pJ(raw);
+if(!s)throw new Error(“生成失敗。もう一度お試しください”);
+const scenario={id:“g”+Date.now(),title:s.title,genre:s.genre,setting:s.setting,firstScene:s.firstScene};
+setSc(scenario);
+setScenes([{type:“scene”,text:scenario.firstScene,sceneNumber:0}]);
+setHist([{role:“user”,content:“設定：「”+scenario.title+”」\n”+scenario.setting+”\n\n最初の場面：\n”+scenario.firstScene+”\n\nsceneNumber=1から。了解とだけ答えて。”},{role:“assistant”,content:“了解”}]);
+setALog([]);setEnding(null);setFast(0);setTotal(0);subRef.current=false;setChallenging(false);setCountNum(null);fade();
+// Go to mic permission step
+setPhase(“micprep”);
+}catch(err){alert(“エラー: “+err.message)}
+setGen(false);
+};
 
-  // === 5SEC CHALLENGE ===
-  // Uses the EXACT same SpeechRecognition code as the working 🎤 button
-  const startChallenge=()=>{
-    if(loading||subRef.current)return;
+// === SUBMIT ===
+const doSubmit=async(text,wasChallengeSuccess)=>{
+if(subRef.current)return;subRef.current=true;
+stopRec();setChallenging(false);setCountNum(null);setUIn(””);
+if(wasChallengeSuccess!==undefined){
+setTotal(t=>t+1);
+if(wasChallengeSuccess)setFast(f=>f+1);
+}
+setScenes(p=>[…p,{type:“action”,text}]);
+setALog(p=>[…p,text]);
+setLoading(true);
+
+```
+const nh=[...hist,{role:"user",content:text}];
+const th=nh.length<=14?nh:[...nh.slice(0,2),...nh.slice(-12)];
+try{
+  const data=await callAPI(SYS,th);
+  const raw=data.content.map(c=>c.type==="text"?c.text:"").filter(Boolean).join("\n");
+  const p=pJ(raw)||{narrative:raw||"...",situation:"",sceneNumber:scenes.filter(s=>s.type==="scene").length+1,isEnding:false};
+  setScenes(prev=>[...prev,{type:"scene",text:p.narrative,sceneNumber:p.sceneNumber,situation:p.situation}]);
+  setHist([...nh,{role:"assistant",content:JSON.stringify(p)}]);
+  if(p.isEnding)setEnding({title:p.endingTitle||"結末",summary:p.endingSummary||""});
+}catch(err){setScenes(prev=>[...prev,{type:"scene",text:"（エラー: "+err.message+"）",sceneNumber:-1}])}
+setLoading(false);subRef.current=false;
+```
+
+};
+
+// === 5SEC CHALLENGE with countdown ===
+const startChallenge=()=>{
+if(loading||subRef.current)return;
+stopRec();
+const SR=window.SpeechRecognition||window.webkitSpeechRecognition;
+if(!SR){doSubmit(”（音声非対応）”,false);return}
+const r=new SR();r.lang=“ja-JP”;r.interimResults=true;r.continuous=false;
+rRef.current=r;
+t0Ref.current=Date.now();
+let submitted=false;
+
+```
+r.onresult=(e)=>{
+  const t=Array.from(e.results).map(x=>x[0].transcript).join("");
+  setUIn(t);
+  if(e.results[e.results.length-1].isFinal&&!submitted){
+    submitted=true;
+    const sec=(Date.now()-t0Ref.current)/1000;
+    clearTimeout(ltRef.current);clearInterval(countRef.current);
     stopRec();
-    const SR=window.SpeechRecognition||window.webkitSpeechRecognition;
-    if(!SR){doSubmit("（音声非対応）",false);return}
-    const r=new SR();
-    r.lang="ja-JP";r.interimResults=true;r.continuous=false;
-    rRef.current=r;
-    t0Ref.current=Date.now();
-    let submitted=false;
+    doSubmit(t,sec<=5);
+  }
+};
+r.onerror=(e)=>{
+  if(submitted)return;submitted=true;
+  clearTimeout(ltRef.current);clearInterval(countRef.current);stopRec();
+  if(e.error!=="aborted")doSubmit("（聞き取れなかった）",false);
+};
+r.onend=()=>{
+  setListening(false);
+  if(!submitted){
+    submitted=true;clearTimeout(ltRef.current);clearInterval(countRef.current);
+    // Use whatever text is in the input
+    const currentText=uInRef.current;
+    if(currentText&&currentText.trim()){
+      doSubmit(currentText.trim(),((Date.now()-t0Ref.current)/1000)<=5);
+    }
+  }
+};
 
-    r.onresult=(e)=>{
-      const t=Array.from(e.results).map(x=>x[0].transcript).join("");
-      setUIn(t);
-      if(e.results[e.results.length-1].isFinal&&!submitted){
-        submitted=true;
-        const sec=(Date.now()-t0Ref.current)/1000;
-        clearTimeout(ltRef.current);
-        stopRec();
-        doSubmit(t,sec<=5);
-      }
-    };
-    r.onerror=(e)=>{
-      if(submitted)return;submitted=true;
-      clearTimeout(ltRef.current);stopRec();
-      if(e.error!=="aborted")doSubmit("（聞き取れなかった）",false);
-    };
-    r.onend=()=>{
-      setListening(false);
-      if(!submitted){submitted=true;clearTimeout(ltRef.current);
-        if(uIn&&uIn.trim()){doSubmit(uIn.trim(),((Date.now()-t0Ref.current)/1000)<=5)}
-      }
-    };
+r.start();
+setListening(true);
+setChallenging(true);
 
-    r.start();
-    setListening(true);
-    setChallenging(true);
+// Beep + start countdown from 5
+beep(880,0.1);
+let count=5;
+setCountNum(5);
+countRef.current=setInterval(()=>{
+  count--;
+  setCountNum(count);
+  if(count<=2)beep(660,0.06);
+  if(count<=0){
+    clearInterval(countRef.current);
+    beep(440,0.15);
+  }
+},1000);
 
-    ltRef.current=setTimeout(()=>{
-      if(submitted)return;submitted=true;
-      stopRec();doSubmit("（時間切れ）",false);
-    },6000);
-  };
+// Timeout at 5.5s - submit whatever we have
+ltRef.current=setTimeout(()=>{
+  if(submitted)return;submitted=true;
+  clearInterval(countRef.current);
+  const currentText=uInRef.current;
+  stopRec();
+  if(currentText&&currentText.trim()){
+    doSubmit(currentText.trim(),false);
+  }else{
+    doSubmit("（時間切れ）",false);
+  }
+},5500);
+```
 
-  // === MANUAL MIC (same code that already works) ===
-  const manualMic=()=>{
-    if(loading||subRef.current)return;
-    stopRec();
-    const SR=window.SpeechRecognition||window.webkitSpeechRecognition;
-    if(!SR)return;
-    const r=new SR();r.lang="ja-JP";r.interimResults=true;r.continuous=false;
-    rRef.current=r;
-    r.onresult=(e)=>{
-      const t=Array.from(e.results).map(x=>x[0].transcript).join("");
-      setUIn(t);
-      if(e.results[e.results.length-1].isFinal){stopRec();if(!subRef.current)doSubmit(t)}
-    };
-    r.onerror=()=>stopRec();
-    r.onend=()=>setListening(false);
-    r.start();setListening(true);
-  };
+};
 
-  const manualSubmit=()=>{if(!uIn.trim()||loading||subRef.current)return;stopRec();doSubmit(uIn.trim())};
-  const onKey=(e)=>{if(e.key==="Enter"&&!e.shiftKey&&!e.nativeEvent.isComposing){e.preventDefault();manualSubmit()}};
+// === MANUAL INPUT ===
+const manualMic=()=>{
+if(loading||subRef.current)return;stopRec();
+const SR=window.SpeechRecognition||window.webkitSpeechRecognition;if(!SR)return;
+const r=new SR();r.lang=“ja-JP”;r.interimResults=true;r.continuous=false;rRef.current=r;
+r.onresult=(e)=>{const t=Array.from(e.results).map(x=>x[0].transcript).join(””);setUIn(t);if(e.results[e.results.length-1].isFinal){stopRec();if(!subRef.current)doSubmit(t)}};
+r.onerror=()=>stopRec();r.onend=()=>setListening(false);
+r.start();setListening(true);
+};
+const manualSubmit=()=>{if(!uIn.trim()||loading||subRef.current)return;stopRec();doSubmit(uIn.trim())};
+const onKey=(e)=>{if(e.key===“Enter”&&!e.shiftKey&&!e.nativeEvent.isComposing){e.preventDefault();manualSubmit()}};
 
-  // === STYLES ===
-  const ctr={height:vh,background:"linear-gradient(180deg,#0d0d1a,#141428,#0d0d1a)",display:"flex",justifyContent:"center",alignItems:"flex-start",padding:"8px 8px 0",overflow:"hidden"};
-  const card={width:"100%",maxWidth:500,height:"100%",background:"linear-gradient(165deg,#181830,#12122a)",borderRadius:"20px 20px 0 0",border:"1px solid #2a2a44",borderBottom:"none",padding:"16px 16px 0",opacity:fi?1:0,transform:fi?"translateY(0)":"translateY(12px)",transition:"opacity .4s,transform .4s",display:"flex",flexDirection:"column",overflow:"hidden"};
-  const chip=(sel)=>({padding:"10px 16px",border:"none",borderRadius:10,background:sel?"#64dfdf22":"transparent",outline:sel?"1.5px solid #64dfdf66":"1.5px solid #2a2a42",color:sel?"#64dfdf":"#7a7a8a",fontSize:15,fontWeight:sel?600:400,cursor:"pointer"});
+// === STYLES ===
+const ctr={height:vh,background:`linear-gradient(180deg,${C.bg},${C.bg2},${C.bg})`,display:“flex”,justifyContent:“center”,alignItems:“flex-start”,padding:“8px 8px 0”,overflow:“hidden”};
+const card={width:“100%”,maxWidth:500,height:“100%”,background:`linear-gradient(165deg,${C.card},${C.card2})`,borderRadius:“20px 20px 0 0”,border:`1px solid ${C.border}`,borderBottom:“none”,padding:“16px 16px 0”,opacity:fi?1:0,transform:fi?“translateY(0)”:“translateY(12px)”,transition:“opacity .4s,transform .4s”,display:“flex”,flexDirection:“column”,overflow:“hidden”};
+const chip=(sel)=>({padding:“10px 16px”,border:“none”,borderRadius:10,background:sel?C.accentBg:“transparent”,outline:sel?`1.5px solid ${C.accent}`:`1.5px solid ${C.border}`,color:sel?C.accent:C.textSub,fontSize:15,fontWeight:sel?600:400,cursor:“pointer”});
+const secBox={background:C.bg2,borderRadius:16,padding:14,marginBottom:8,border:`1px solid ${C.border}`,textAlign:“left”};
 
-  return(
-    <div style={ctr}><div style={card}>
+return(
+<div style={ctr}><div style={card}>
 
-      {/* SETUP */}
-      {phase==="setup"&&(
-        <div style={{textAlign:"center",animation:"slideUp .6s ease",overflowY:"auto",flex:1,paddingBottom:20}}>
-          <div style={{...mf,fontSize:12,color:"#64dfdf",letterSpacing:4,marginBottom:16}}>STILLNOVA STUDIO</div>
-          <h1 style={{fontSize:28,color:"#e8e8f0",fontWeight:700,marginBottom:24}}>Brain Story 5sec</h1>
-          <div style={{background:"#1a1a2e",borderRadius:16,padding:20,border:"1px solid #2a2a42",textAlign:"left"}}>
-            <div style={{...mf,fontSize:12,color:"#64dfdf",marginBottom:10}}>API KEY</div>
-            <p style={{fontSize:14,color:"#7a7a8a",lineHeight:1.7,marginBottom:12}}>Claude APIキーを入力してください。</p>
-            <input type="password" value={keyIn} onChange={e=>setKeyIn(e.target.value)} placeholder="sk-ant-..."
-              style={{width:"100%",padding:"14px 16px",background:"#12122a",border:"1.5px solid #2a2a42",borderRadius:12,color:"#d4d4e0",fontSize:16,marginBottom:12}}/>
-            <button onClick={saveKey} style={{width:"100%",padding:16,border:"none",borderRadius:14,background:keyIn.trim()?"linear-gradient(135deg,#64dfdf,#4ab8b8)":"#2a2a42",color:keyIn.trim()?"#0d0d1a":"#5a5a6a",fontSize:16,fontWeight:700,cursor:keyIn.trim()?"pointer":"default"}}>はじめる</button>
-          </div>
+```
+  {/* SETUP */}
+  {phase==="setup"&&(
+    <div style={{textAlign:"center",animation:"slideUp .6s ease",overflowY:"auto",flex:1,paddingBottom:20}}>
+      <div style={{...mf,fontSize:12,color:C.accent,letterSpacing:4,marginBottom:16}}>STILLNOVA STUDIO</div>
+      <h1 style={{fontSize:28,color:C.text,fontWeight:700,marginBottom:24}}>Brain Story 5sec</h1>
+      <div style={{...secBox,padding:20}}>
+        <div style={{...mf,fontSize:12,color:C.accent,marginBottom:10}}>API KEY</div>
+        <p style={{fontSize:14,color:C.textSub,lineHeight:1.7,marginBottom:12}}>Claude APIキーを入力してください。</p>
+        <input type="password" value={keyIn} onChange={e=>setKeyIn(e.target.value)} placeholder="sk-ant-..."
+          style={{width:"100%",padding:"14px 16px",background:C.bg,border:`1.5px solid ${C.border}`,borderRadius:12,color:C.text,fontSize:16,marginBottom:12}}/>
+        <button onClick={saveKey} style={{width:"100%",padding:16,border:"none",borderRadius:14,background:keyIn.trim()?`linear-gradient(135deg,${C.accent},#d08030)`:C.border,color:keyIn.trim()?C.bg:C.textMuted,fontSize:16,fontWeight:700,cursor:keyIn.trim()?"pointer":"default"}}>はじめる</button>
+      </div>
+    </div>
+  )}
+
+  {/* TITLE */}
+  {phase==="title"&&(
+    <div style={{textAlign:"center",animation:"slideUp .6s ease",overflowY:"auto",flex:1,paddingBottom:20}}>
+      <div style={{...mf,fontSize:12,color:C.accent,letterSpacing:4,marginBottom:10}}>STILLNOVA STUDIO</div>
+      <h1 style={{fontSize:28,color:C.text,fontWeight:700,marginBottom:2}}>Brain Story</h1>
+      <div style={{...mf,fontSize:22,color:C.accent,marginBottom:6,letterSpacing:2}}>5<span style={{fontSize:14,verticalAlign:"super"}}>sec</span></div>
+      <p style={{fontSize:14,color:C.textSub,lineHeight:1.7,marginBottom:14}}>状況を聞いて、5秒で判断。<br/>あなたの言葉で物語が動く。</p>
+
+      <div style={secBox}>
+        <div style={{...mf,fontSize:12,color:C.accent,marginBottom:8}}>主人公</div>
+        <div style={{display:"flex",gap:6,flexWrap:"wrap"}}>
+          {PS.map(p=><button key={p.id} onClick={()=>setSp(p.id)} style={chip(sp===p.id)}>{p.l}</button>)}
         </div>
-      )}
-
-      {/* TITLE */}
-      {phase==="title"&&(
-        <div style={{textAlign:"center",animation:"slideUp .6s ease",overflowY:"auto",flex:1,paddingBottom:20}}>
-          <div style={{...mf,fontSize:12,color:"#64dfdf",letterSpacing:4,marginBottom:10}}>STILLNOVA STUDIO</div>
-          <h1 style={{fontSize:28,color:"#e8e8f0",fontWeight:700,marginBottom:2}}>Brain Story</h1>
-          <div style={{...mf,fontSize:22,color:"#ffd166",marginBottom:6,letterSpacing:2}}>5<span style={{fontSize:14,verticalAlign:"super"}}>sec</span></div>
-          <p style={{fontSize:14,color:"#7a7a8a",lineHeight:1.7,marginBottom:14}}>状況を聞いて、5秒で判断。<br/>あなたの言葉で物語が動く。</p>
-
-          <div style={{background:"#1a1a2e",borderRadius:16,padding:14,marginBottom:8,border:"1px solid #2a2a42",textAlign:"left"}}>
-            <div style={{...mf,fontSize:12,color:"#64dfdf",marginBottom:8}}>主人公</div>
-            <div style={{display:"flex",gap:6,flexWrap:"wrap"}}>
-              {PS.map(p=><button key={p.id} onClick={()=>setSp(p.id)} style={chip(sp===p.id)}>{p.l}</button>)}
-            </div>
-          </div>
-          <div style={{background:"#1a1a2e",borderRadius:16,padding:14,marginBottom:8,border:"1px solid #2a2a42",textAlign:"left"}}>
-            <div style={{...mf,fontSize:12,color:"#64dfdf",marginBottom:8}}>ジャンル</div>
-            <div style={{display:"flex",gap:6,flexWrap:"wrap"}}>
-              {GS.map(g=><button key={g.id} onClick={()=>setSg(g.id)} style={chip(sg===g.id)}>{g.l}</button>)}
-            </div>
-          </div>
-          <div style={{background:"#1a1a2e",borderRadius:16,padding:14,marginBottom:14,border:"1px solid #2a2a42",textAlign:"left"}}>
-            <div style={{...mf,fontSize:12,color:"#64dfdf",marginBottom:8}}>気分</div>
-            <div style={{display:"flex",gap:6,flexWrap:"wrap"}}>
-              {MS.map(m=><button key={m.id} onClick={()=>setSm(m.id)} style={chip(sm===m.id)}>{m.l}</button>)}
-            </div>
-          </div>
-          <button onClick={genStory} disabled={gen}
-            style={{width:"100%",padding:16,border:"none",borderRadius:14,background:gen?"#2a2a42":"linear-gradient(135deg,#ffd166,#ffb347)",color:gen?"#5a5a6a":"#0d0d1a",fontSize:17,fontWeight:700,cursor:gen?"default":"pointer",marginBottom:8}}>
-            {gen?"生成中...":"物語をはじめる"}
-          </button>
-          <p style={{fontSize:13,color:"#5a5a6a",marginBottom:4}}>毎回AIが違う物語を作ります</p>
-          <button onClick={()=>{localStorage.removeItem("bs5_key");setApiKey("");setPhase("setup")}} style={{background:"none",border:"none",color:"#3a3a52",fontSize:12,cursor:"pointer"}}>APIキーを変更</button>
+      </div>
+      <div style={secBox}>
+        <div style={{...mf,fontSize:12,color:C.accent,marginBottom:8}}>ジャンル</div>
+        <div style={{display:"flex",gap:6,flexWrap:"wrap"}}>
+          {GS.map(g=><button key={g.id} onClick={()=>setSg(g.id)} style={chip(sg===g.id)}>{g.l}</button>)}
         </div>
-      )}
+      </div>
+      <div style={{...secBox,marginBottom:14}}>
+        <div style={{...mf,fontSize:12,color:C.accent,marginBottom:8}}>気分</div>
+        <div style={{display:"flex",gap:6,flexWrap:"wrap"}}>
+          {MS.map(m=><button key={m.id} onClick={()=>setSm(m.id)} style={chip(sm===m.id)}>{m.l}</button>)}
+        </div>
+      </div>
 
-      {/* PLAYING */}
-      {phase==="playing"&&sc&&(
-        <>
-          <div style={{marginBottom:8,flexShrink:0,display:"flex",justifyContent:"space-between",alignItems:"center"}}>
-            <span style={{...mf,fontSize:12,color:"#64dfdf",letterSpacing:2}}>{sc.genre} — {sc.title}</span>
-            <span style={{...mf,fontSize:12,color:"#5a5a6a"}}>SCENE {scenes.filter(s=>s.type==="scene").length}</span>
-          </div>
+      <button onClick={genStory} disabled={gen}
+        style={{width:"100%",padding:16,border:"none",borderRadius:14,background:gen?C.border:`linear-gradient(135deg,${C.accent},#d08030)`,color:gen?C.textMuted:C.bg,fontSize:17,fontWeight:700,cursor:gen?"default":"pointer",marginBottom:8}}>
+        {gen?"生成中...":"物語をはじめる"}
+      </button>
+      <p style={{fontSize:13,color:C.textMuted,marginBottom:4}}>毎回AIが違う物語を作ります</p>
+      <button onClick={()=>{localStorage.removeItem("bs5_key");setApiKey("");setPhase("setup")}} style={{background:"none",border:"none",color:C.textMuted,fontSize:12,cursor:"pointer"}}>APIキーを変更</button>
+    </div>
+  )}
 
-          <div ref={sRef} style={{flex:1,overflowY:"auto",marginBottom:8,paddingRight:4,minHeight:0}}>
-            {scenes.map((s,i)=>(
-              <div key={i} style={{marginBottom:14,animation:i===scenes.length-1?"slideUp .4s ease":"none"}}>
-                {s.type==="scene"?(
-                  <div>
-                    {s.situation&&<div style={{fontSize:13,color:"#64dfdf88",marginBottom:4,...mf}}>{s.situation}</div>}
-                    <p style={{fontSize:17,color:"#e0e0ec",lineHeight:1.9,whiteSpace:"pre-wrap"}}>{s.text}</p>
-                  </div>
-                ):(
-                  <div style={{padding:"10px 14px",marginLeft:16,background:"#64dfdf10",border:"1px solid #64dfdf33",borderRadius:12}}>
-                    <p style={{fontSize:16,color:"#e8e8f0",lineHeight:1.6}}>{s.text}</p>
-                  </div>
-                )}
+  {/* MIC PREP */}
+  {phase==="micprep"&&(
+    <div style={{textAlign:"center",animation:"slideUp .6s ease",flex:1,display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",paddingBottom:40}}>
+      <div style={{fontSize:48,marginBottom:20}}>🎤</div>
+      <h2 style={{fontSize:22,color:C.text,fontWeight:700,marginBottom:12}}>マイクを準備します</h2>
+      <p style={{fontSize:15,color:C.textSub,lineHeight:1.8,marginBottom:24}}>5秒チャレンジで音声入力を使います。<br/>マイクの許可を求められたら<br/>「許可」をタップしてください。</p>
+      <button onClick={requestMic}
+        style={{padding:"16px 40px",border:"none",borderRadius:14,background:`linear-gradient(135deg,${C.accent},#d08030)`,color:C.bg,fontSize:17,fontWeight:700,cursor:"pointer"}}>
+        準備OK
+      </button>
+    </div>
+  )}
+
+  {/* PLAYING */}
+  {phase==="playing"&&sc&&(
+    <>
+      <div style={{marginBottom:8,flexShrink:0,display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+        <span style={{...mf,fontSize:12,color:C.accent,letterSpacing:2}}>{sc.genre} — {sc.title}</span>
+        <span style={{...mf,fontSize:12,color:C.textMuted}}>SCENE {scenes.filter(s=>s.type==="scene").length}</span>
+      </div>
+
+      <div ref={sRef} style={{flex:1,overflowY:"auto",marginBottom:8,paddingRight:4,minHeight:0}}>
+        {scenes.map((s,i)=>(
+          <div key={i} style={{marginBottom:14,animation:i===scenes.length-1?"slideUp .4s ease":"none"}}>
+            {s.type==="scene"?(
+              <div>
+                {s.situation&&<div style={{fontSize:13,color:C.warmDim,marginBottom:4,...mf}}>{s.situation}</div>}
+                <p style={{fontSize:17,color:C.text,lineHeight:1.9,whiteSpace:"pre-wrap"}}>{s.text}</p>
               </div>
-            ))}
-            {loading&&(
-              <div style={{padding:"12px 0",display:"flex",alignItems:"center",gap:8}}>
-                <div style={{display:"flex",gap:4}}>
-                  {[0,1,2].map(i=><div key={i} style={{width:7,height:7,borderRadius:"50%",background:"#64dfdf",animation:`breathe 1.2s ${i*.3}s infinite`}}/>)}
-                </div>
-                <span style={{fontSize:14,color:"#5a5a6a"}}>展開中...</span>
+            ):(
+              <div style={{padding:"10px 14px",marginLeft:16,background:C.accentBg,border:`1px solid ${C.accentDim}`,borderRadius:12}}>
+                <p style={{fontSize:16,color:C.text,lineHeight:1.6}}>{s.text}</p>
               </div>
             )}
           </div>
+        ))}
+        {loading&&(
+          <div style={{padding:"12px 0",display:"flex",alignItems:"center",gap:8}}>
+            <div style={{display:"flex",gap:4}}>
+              {[0,1,2].map(i=><div key={i} style={{width:7,height:7,borderRadius:"50%",background:C.accent,animation:`breathe 1.2s ${i*.3}s infinite`}}/>)}
+            </div>
+            <span style={{fontSize:14,color:C.textMuted}}>展開中...</span>
+          </div>
+        )}
+      </div>
 
-          {/* INPUT AREA */}
-          {!ending?(
-            <div style={{flexShrink:0,paddingBottom:8}}>
+      {/* INPUT AREA */}
+      {!ending?(
+        <div style={{flexShrink:0,paddingBottom:8}}>
 
-              {/* 5秒チャレンジ中の表示 */}
-              {challenging&&(
-                <div style={{marginBottom:8}}>
-                  <div style={{height:5,background:"#2a2a42",borderRadius:3,overflow:"hidden",marginBottom:6}}>
-                    <div style={{height:"100%",background:"linear-gradient(90deg,#ffd166,#ff4757)",animation:"countdown5 5s linear forwards",borderRadius:3}}/>
-                  </div>
-                  <div style={{textAlign:"center",display:"flex",alignItems:"center",justifyContent:"center",gap:8}}>
-                    <span style={{fontSize:22,animation:"pulse .6s infinite"}}>🎤</span>
-                    <span style={{fontSize:16,color:"#ffd166",fontWeight:600}}>5秒以内に声で答えて！</span>
-                  </div>
-                  {uIn&&<p style={{fontSize:15,color:"#e0e0ec",textAlign:"center",marginTop:6}}>「{uIn}」</p>}
+          {/* Active challenge: countdown display */}
+          {challenging&&(
+            <div style={{marginBottom:8}}>
+              {/* Big countdown number */}
+              {countNum!==null&&(
+                <div key={countNum} style={{textAlign:"center",marginBottom:6}}>
+                  <span style={{fontSize:48,fontWeight:700,color:countNum<=2?C.danger:C.accent,...mf,animation:"countPop .3s ease",display:"inline-block"}}>{countNum}</span>
                 </div>
               )}
-
-              {/* 通常の入力エリア */}
-              {!challenging&&!loading&&(
-                <>
-                  <button onClick={startChallenge}
-                    style={{width:"100%",padding:14,border:"none",borderRadius:14,background:"linear-gradient(135deg,#ffd166,#ffb347)",color:"#0d0d1a",fontSize:17,fontWeight:700,cursor:"pointer",marginBottom:8,letterSpacing:1}}>
-                    🎤 5秒チャレンジ！
-                  </button>
-                  <div style={{display:"flex",gap:6,alignItems:"center"}}>
-                    <button onClick={listening?stopRec:manualMic}
-                      style={{width:44,height:44,border:"none",borderRadius:12,background:listening?"linear-gradient(135deg,#ff4757,#ff6b6b)":"#1e1e32",color:listening?"#fff":"#6a6a7a",fontSize:18,cursor:"pointer",flexShrink:0,display:"flex",alignItems:"center",justifyContent:"center",animation:listening?"pulse 1s infinite":"none"}}>🎤</button>
-                    <input ref={iRef} type="text" value={uIn} onChange={e=>setUIn(e.target.value)} onKeyDown={onKey}
-                      placeholder="テキストで入力もOK" disabled={loading}
-                      style={{flex:1,padding:"10px 14px",background:"#1a1a2e",border:"1.5px solid #2a2a42",borderRadius:12,color:"#d4d4e0",fontSize:16,lineHeight:1.4}}/>
-                    <button onClick={manualSubmit} disabled={!uIn.trim()||loading}
-                      style={{padding:"10px 14px",border:"none",borderRadius:12,background:uIn.trim()?"linear-gradient(135deg,#64dfdf,#4ab8b8)":"#2a2a42",color:uIn.trim()?"#0d0d1a":"#5a5a6a",fontSize:15,fontWeight:700,cursor:uIn.trim()?"pointer":"default",flexShrink:0,height:44}}>→</button>
-                  </div>
-                </>
-              )}
-            </div>
-          ):(
-            <div style={{flexShrink:0,animation:"slideUp .5s ease",paddingBottom:8}}>
-              <div style={{background:"#1a1a2e",borderRadius:14,padding:14,border:"1px solid #64dfdf33",marginBottom:10}}>
-                <div style={{...mf,fontSize:11,color:"#64dfdf",letterSpacing:3,marginBottom:6}}>ENDING</div>
-                <div style={{fontSize:20,color:"#e8e8f0",fontWeight:700,marginBottom:8,lineHeight:1.4}}>{ending.title}</div>
-                <p style={{fontSize:15,color:"#a0a0b0",lineHeight:1.8}}>{ending.summary}</p>
-                {total>0&&(
-                  <div style={{marginTop:10,padding:"8px 12px",background:"#12122a",borderRadius:10,textAlign:"center"}}>
-                    <span style={{...mf,fontSize:15,color:"#ffd166"}}>即断 {fast}/{total}</span>
-                  </div>
-                )}
+              {/* Progress bar */}
+              <div style={{height:5,background:C.border,borderRadius:3,overflow:"hidden",marginBottom:6}}>
+                <div style={{height:"100%",background:`linear-gradient(90deg,${C.countBar1},${C.countBar2})`,animation:"countdown5 5s linear forwards",borderRadius:3}}/>
               </div>
-              <div style={{display:"flex",gap:8}}>
-                <button onClick={()=>{stopRec();fade();setPhase("ending")}} style={{flex:1,padding:14,border:"none",borderRadius:14,background:"linear-gradient(135deg,#64dfdf,#4ab8b8)",color:"#0d0d1a",fontSize:15,fontWeight:700,cursor:"pointer"}}>振り返り</button>
-                <button onClick={()=>{stopRec();fade();setPhase("title")}} style={{flex:1,padding:14,border:"1.5px solid #3a3a52",borderRadius:14,background:"transparent",color:"#8a8a9a",fontSize:15,cursor:"pointer"}}>次の物語</button>
+              <div style={{textAlign:"center",display:"flex",alignItems:"center",justifyContent:"center",gap:8}}>
+                <span style={{fontSize:18,animation:"pulse .6s infinite"}}>🎤</span>
+                <span style={{fontSize:15,color:C.accent,fontWeight:600}}>声で答えて！</span>
               </div>
+              {uIn&&<p style={{fontSize:16,color:C.warm,textAlign:"center",marginTop:6,padding:"6px 12px",background:C.accentBg,borderRadius:8}}>「{uIn}」</p>}
             </div>
           )}
-        </>
+
+          {/* Normal input */}
+          {!challenging&&!loading&&(
+            <>
+              <button onClick={startChallenge}
+                style={{width:"100%",padding:14,border:"none",borderRadius:14,background:`linear-gradient(135deg,${C.accent},#d08030)`,color:C.bg,fontSize:17,fontWeight:700,cursor:"pointer",marginBottom:8,letterSpacing:1}}>
+                🎤 5秒チャレンジ！
+              </button>
+              <div style={{display:"flex",gap:6,alignItems:"center"}}>
+                <button onClick={listening?stopRec:manualMic}
+                  style={{width:44,height:44,border:"none",borderRadius:12,background:listening?`linear-gradient(135deg,${C.danger},#e66)`:`${C.bg2}`,color:listening?"#fff":C.textSub,fontSize:18,cursor:"pointer",flexShrink:0,display:"flex",alignItems:"center",justifyContent:"center",animation:listening?"pulse 1s infinite":"none"}}>🎤</button>
+                <input ref={iRef} type="text" value={uIn} onChange={e=>setUIn(e.target.value)} onKeyDown={onKey}
+                  placeholder="テキストで入力もOK" disabled={loading}
+                  style={{flex:1,padding:"10px 14px",background:C.bg,border:`1.5px solid ${C.border}`,borderRadius:12,color:C.text,fontSize:16,lineHeight:1.4}}/>
+                <button onClick={manualSubmit} disabled={!uIn.trim()||loading}
+                  style={{padding:"10px 14px",border:"none",borderRadius:12,background:uIn.trim()?`linear-gradient(135deg,${C.accent},#d08030)`:C.border,color:uIn.trim()?C.bg:C.textMuted,fontSize:15,fontWeight:700,cursor:uIn.trim()?"pointer":"default",flexShrink:0,height:44}}>→</button>
+              </div>
+            </>
+          )}
+        </div>
+      ):(
+        <div style={{flexShrink:0,animation:"slideUp .5s ease",paddingBottom:8}}>
+          <div style={{background:C.bg2,borderRadius:14,padding:14,border:`1px solid ${C.accentDim}`,marginBottom:10}}>
+            <div style={{...mf,fontSize:11,color:C.accent,letterSpacing:3,marginBottom:6}}>ENDING</div>
+            <div style={{fontSize:20,color:C.text,fontWeight:700,marginBottom:8,lineHeight:1.4}}>{ending.title}</div>
+            <p style={{fontSize:15,color:C.warm,lineHeight:1.8}}>{ending.summary}</p>
+            {total>0&&(
+              <div style={{marginTop:10,padding:"8px 12px",background:C.bg,borderRadius:10,textAlign:"center"}}>
+                <span style={{...mf,fontSize:15,color:C.accent}}>即断 {fast}/{total}</span>
+              </div>
+            )}
+          </div>
+          <div style={{display:"flex",gap:8}}>
+            <button onClick={()=>{stopRec();fade();setPhase("ending")}} style={{flex:1,padding:14,border:"none",borderRadius:14,background:`linear-gradient(135deg,${C.accent},#d08030)`,color:C.bg,fontSize:15,fontWeight:700,cursor:"pointer"}}>振り返り</button>
+            <button onClick={()=>{stopRec();fade();setPhase("title")}} style={{flex:1,padding:14,border:`1.5px solid ${C.border}`,borderRadius:14,background:"transparent",color:C.textSub,fontSize:15,cursor:"pointer"}}>次の物語</button>
+          </div>
+        </div>
       )}
+    </>
+  )}
 
-      {/* ENDING DETAIL */}
-      {phase==="ending"&&ending&&sc&&(
-        <div style={{animation:"slideUp .6s ease",overflowY:"auto",flex:1,paddingBottom:20}}>
-          <div style={{...mf,fontSize:12,color:"#64dfdf",letterSpacing:3,marginBottom:20,textAlign:"center"}}>ENDING</div>
-          <div style={{fontSize:24,color:"#e8e8f0",fontWeight:700,marginBottom:16,lineHeight:1.4,textAlign:"center"}}>{ending.title}</div>
-          <p style={{fontSize:16,color:"#a0a0b0",lineHeight:2,marginBottom:16}}>{ending.summary}</p>
+  {/* ENDING DETAIL */}
+  {phase==="ending"&&ending&&sc&&(
+    <div style={{animation:"slideUp .6s ease",overflowY:"auto",flex:1,paddingBottom:20}}>
+      <div style={{...mf,fontSize:12,color:C.accent,letterSpacing:3,marginBottom:20,textAlign:"center"}}>ENDING</div>
+      <div style={{fontSize:24,color:C.text,fontWeight:700,marginBottom:16,lineHeight:1.4,textAlign:"center"}}>{ending.title}</div>
+      <p style={{fontSize:16,color:C.warm,lineHeight:2,marginBottom:16}}>{ending.summary}</p>
 
-          {total>0&&(
-            <div style={{background:"#1a1a2e",borderRadius:14,padding:16,marginBottom:16,border:"1px solid #ffd16633",textAlign:"center"}}>
-              <div style={{...mf,fontSize:12,color:"#ffd166",marginBottom:8}}>5SEC CHALLENGE</div>
-              <div style={{fontSize:36,color:"#ffd166",fontWeight:700,...mf}}>{fast}/{total}</div>
-              <p style={{fontSize:14,color:"#7a7a8a",marginTop:4}}>回の即断に成功</p>
-            </div>
-          )}
-
-          <div style={{background:"#1a1a2e",borderRadius:14,padding:16,marginBottom:14,border:"1px solid #2a2a42",maxHeight:350,overflowY:"auto"}}>
-            <div style={{...mf,fontSize:12,color:"#64dfdf",letterSpacing:2,marginBottom:12}}>FULL STORY</div>
-            <p style={{fontSize:15,color:"#8a8a9a",lineHeight:1.8,marginBottom:10,whiteSpace:"pre-wrap"}}>{sc.firstScene}</p>
-            {scenes.slice(1).map((s,i)=>(
-              <div key={i} style={{marginBottom:10}}>
-                {s.type==="action"?(
-                  <div style={{padding:"6px 10px",marginLeft:12,background:"#64dfdf08",border:"1px solid #64dfdf22",borderRadius:8}}>
-                    <span style={{fontSize:14,color:"#c4c4d0"}}>{s.text}</span>
-                  </div>
-                ):(
-                  <p style={{fontSize:14,color:"#8a8a9a",lineHeight:1.8,whiteSpace:"pre-wrap"}}>{s.text}</p>
-                )}
-              </div>
-            ))}
-          </div>
-
-          <div style={{background:"#1a1a2e",borderRadius:14,padding:16,marginBottom:16,border:"1px solid #2a2a42"}}>
-            <div style={{...mf,fontSize:12,color:"#ffd166",letterSpacing:2,marginBottom:10}}>YOUR ACTIONS</div>
-            {aLog.map((a,i)=>(
-              <div key={i} style={{display:"flex",gap:10,padding:"6px 0",borderBottom:i<aLog.length-1?"1px solid #22223a":"none"}}>
-                <span style={{...mf,fontSize:12,color:"#5a5a6a",width:20,flexShrink:0}}>{i+1}</span>
-                <span style={{fontSize:14,color:"#a0a0b0",lineHeight:1.6}}>{a}</span>
-              </div>
-            ))}
-          </div>
-
-          <button onClick={()=>{fade();setPhase("title")}} style={{width:"100%",padding:16,border:"none",borderRadius:14,background:"linear-gradient(135deg,#ffd166,#ffb347)",color:"#0d0d1a",fontSize:17,fontWeight:700,cursor:"pointer",marginBottom:8}}>新しい物語をはじめる</button>
+      {total>0&&(
+        <div style={{background:C.bg2,borderRadius:14,padding:16,marginBottom:16,border:`1px solid ${C.accentDim}`,textAlign:"center"}}>
+          <div style={{...mf,fontSize:12,color:C.accent,marginBottom:8}}>5SEC CHALLENGE</div>
+          <div style={{fontSize:36,color:C.accent,fontWeight:700,...mf}}>{fast}/{total}</div>
+          <p style={{fontSize:14,color:C.textSub,marginTop:4}}>回の即断に成功</p>
         </div>
       )}
 
-    </div></div>
-  );
+      <div style={{background:C.bg2,borderRadius:14,padding:16,marginBottom:14,border:`1px solid ${C.border}`,maxHeight:350,overflowY:"auto"}}>
+        <div style={{...mf,fontSize:12,color:C.accent,letterSpacing:2,marginBottom:12}}>FULL STORY</div>
+        <p style={{fontSize:15,color:C.textSub,lineHeight:1.8,marginBottom:10,whiteSpace:"pre-wrap"}}>{sc.firstScene}</p>
+        {scenes.slice(1).map((s,i)=>(
+          <div key={i} style={{marginBottom:10}}>
+            {s.type==="action"?(
+              <div style={{padding:"6px 10px",marginLeft:12,background:C.accentBg,border:`1px solid ${C.accentDim}`,borderRadius:8}}>
+                <span style={{fontSize:14,color:C.warm}}>{s.text}</span>
+              </div>
+            ):(
+              <p style={{fontSize:14,color:C.textSub,lineHeight:1.8,whiteSpace:"pre-wrap"}}>{s.text}</p>
+            )}
+          </div>
+        ))}
+      </div>
+
+      <div style={{background:C.bg2,borderRadius:14,padding:16,marginBottom:16,border:`1px solid ${C.border}`}}>
+        <div style={{...mf,fontSize:12,color:C.accent,letterSpacing:2,marginBottom:10}}>YOUR ACTIONS</div>
+        {aLog.map((a,i)=>(
+          <div key={i} style={{display:"flex",gap:10,padding:"6px 0",borderBottom:i<aLog.length-1?`1px solid ${C.border}`:"none"}}>
+            <span style={{...mf,fontSize:12,color:C.textMuted,width:20,flexShrink:0}}>{i+1}</span>
+            <span style={{fontSize:14,color:C.warm,lineHeight:1.6}}>{a}</span>
+          </div>
+        ))}
+      </div>
+
+      <button onClick={()=>{fade();setPhase("title")}} style={{width:"100%",padding:16,border:"none",borderRadius:14,background:`linear-gradient(135deg,${C.accent},#d08030)`,color:C.bg,fontSize:17,fontWeight:700,cursor:"pointer",marginBottom:8}}>新しい物語をはじめる</button>
+    </div>
+  )}
+
+</div></div>
+```
+
+);
 }
-ReactDOM.createRoot(document.getElementById("root")).render(<App/>);
+ReactDOM.createRoot(document.getElementById(“root”)).render(<App/>);
 </script>
+
 </body>
 </html>
