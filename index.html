@@ -59,6 +59,7 @@ endingSummary,endingLesson,endingPattern,endingIfOnlyは空文字にする。
 - narrativeは3〜4文
 - narrativeの最後は必ず「あなたならどうする？」で終える
 - isEnding=trueの場合のみ「あなたならどうする？」は不要
+- 登場人物の名前は毎回変える。田中、佐藤、山田のような超一般的な名前は禁止。少し珍しいが読みやすい名前にする（例：柊、日向、朝比奈、湊、千歳など）
 
 # 入力の解釈
 - どんな回答もできるだけ物語に反映する
@@ -95,12 +96,12 @@ endingSummary,endingLesson,endingPattern,endingIfOnlyは空文字にする。
 
 const SGEN=`条件：主人公={p}、ジャンル={g}、気分={m}
 
-JSON形式のみ。絵文字禁止。やさしい日本語。1文40文字以内。
+JSON形式のみ。絵文字禁止。やさしい日本語。1文40文字以内。登場人物の名前は田中・佐藤・山田のような超一般的な名前を避け、少し珍しいが読みやすい名前にする。
 {"title":"タイトル","genre":"ジャンル短縮","setting":"2文の設定。秘密かタイムリミットを含む","firstScene":"最初の場面3〜4文。最後は「あなたならどうする？」で終える"}`;
 
 const PS=[{id:"man",l:"男性"},{id:"woman",l:"女性"},{id:"child",l:"子供"},{id:"other",l:"人間以外"}];
-const GS=[{id:"work",l:"仕事"},{id:"daily",l:"日常"},{id:"mystery",l:"ミステリー"},{id:"scifi",l:"SF"},{id:"fantasy",l:"ファンタジー"},{id:"survival",l:"サバイバル"}];
-const MS=[{id:"thrill",l:"ハラハラ"},{id:"warm",l:"ほっこり"},{id:"think",l:"考えさせられる"},{id:"funny",l:"笑える"}];
+const GS=[{id:"mystery",l:"ミステリー"},{id:"survival",l:"サバイバル"},{id:"fantasy",l:"ファンタジー"},{id:"daily",l:"日常"},{id:"work",l:"仕事"},{id:"scifi",l:"SF"}];
+const MS=[{id:"think",l:"考えさせられる"},{id:"thrill",l:"ハラハラ"},{id:"funny",l:"笑える"},{id:"warm",l:"ほっこり"}];
 const mf={fontFamily:"'DM Mono',monospace"};
 
 // === BEEP SOUND ===
@@ -132,8 +133,8 @@ function App(){
   const [fi,setFi]=useState(true);
   const [vh,setVh]=useState(window.innerHeight);
   const [sp,setSp]=useState("man");
-  const [sg,setSg]=useState("daily");
-  const [sm,setSm]=useState("thrill");
+  const [sg,setSg]=useState("mystery");
+  const [sm,setSm]=useState("think");
   const [gen,setGen]=useState(false);
   const [challenging,setChallenging]=useState(false);
   const [countNum,setCountNum]=useState(null); // 5,4,3,2,1,0
@@ -315,7 +316,8 @@ function App(){
       const currentText=uInRef.current;
       stopRec();
       if(currentText&&currentText.trim()){
-        doSubmit(currentText.trim(),false);
+        // User spoke within the window - count as success
+        doSubmit(currentText.trim(),true);
       }else{
         doSubmit("（時間切れ）",false);
       }
