@@ -47,7 +47,10 @@ const C={
 const SYS=`あなたはインタラクティブストーリーのゲームマスターです。
 
 必ず以下のJSON形式のみで返答。JSON以外は出力禁止。絵文字・特殊記号は禁止。
-{"narrative":"場面の描写","situation":"状況1文","sceneNumber":1,"isEnding":false,"endingTitle":"","endingSummary":""}
+{"narrative":"場面の描写","situation":"状況1文","sceneNumber":1,"isEnding":false,"endingTitle":"","endingSummary":"","endingLesson":"","endingPattern":"","endingIfOnly":""}
+
+# 通常場面（isEnding=false）
+endingSummary,endingLesson,endingPattern,endingIfOnlyは空文字にする。
 
 # 文体（最重要）
 - 小学校高学年が読めるやさしい日本語
@@ -67,17 +70,28 @@ const SYS=`あなたはインタラクティブストーリーのゲームマス
 # 絶対禁止
 - 前の場面と同じ内容・同じ描写を繰り返すこと
 - 物語が止まること。どんな入力でも必ず新しい展開にすること
+- 淡々と出来事が順番に起きるだけの展開
 
-# 物語
-- scene 1の物や人が後で重要になるように仕込む
-- scene 2〜3で意外な展開を入れる
+# ストーリーの仕掛け（重要）
+- scene 1で何気なく登場した物や人を、後で重要な意味を持たせる（伏線）
+- scene 2〜3で必ず1つ「情報の反転」を入れる（味方が実は敵、安全な場所が危険、など）
+- 全体で必ず1回「どちらを選んでも何かを失うジレンマ」を入れる
+- 「ほっとした直後にピンチ」「ピンチの中に小さな希望」のリズムを作る
+- 登場人物には動機や理由を持たせる。ただの障害物にしない
 - ユーザーの判断が後の場面に影響する
-- 良いことも悪いことも起きる。悪いことばかり続けない
+
+# 実生活の知恵（さりげなく織り込む）
+- 物語の中に、実生活でも役立つ知恵や気づきを自然に1つ入れる
+- 例：交渉では相手の立場を先に考える、迷ったら選択肢を紙に書く、第一印象で判断しすぎない
+- 説教くさくならないこと。キャラのセリフや行動の結果として自然に伝わるようにする
 
 # 結末（5〜6場面）
 - sceneNumberは1から+1。scene 4から収束。scene 5〜6でisEnding=true。6超え禁止
 - 「あの行動がここに繋がった」と思える構成にする
-- endingSummaryは3文：振り返り、判断パターンの分析、ひとこと`;
+- endingSummary：物語全体の振り返り（2〜3文）
+- endingLesson：この物語から得られる教訓や気づき（1〜2文。実生活に繋がる内容）
+- endingPattern：ユーザーの判断パターンの分析（1〜2文。「あなたは〜型」のように）
+- endingIfOnly：もし別の判断をしていたらどうなっていたか（1〜2文）`;
 
 const SGEN=`条件：主人公={p}、ジャンル={g}、気分={m}
 
@@ -228,7 +242,7 @@ function App(){
       const p=pJ(raw)||{narrative:raw||"...",situation:"",sceneNumber:scenes.filter(s=>s.type==="scene").length+1,isEnding:false};
       setScenes(prev=>[...prev,{type:"scene",text:p.narrative,sceneNumber:p.sceneNumber,situation:p.situation}]);
       setHist([...nh,{role:"assistant",content:JSON.stringify(p)}]);
-      if(p.isEnding)setEnding({title:p.endingTitle||"結末",summary:p.endingSummary||""});
+      if(p.isEnding)setEnding({title:p.endingTitle||"結末",summary:p.endingSummary||"",lesson:p.endingLesson||"",pattern:p.endingPattern||"",ifOnly:p.endingIfOnly||""});
     }catch(err){setScenes(prev=>[...prev,{type:"scene",text:"（エラー: "+err.message+"）",sceneNumber:-1}])}
     setLoading(false);subRef.current=false;
   };
@@ -241,18 +255,22 @@ function App(){
     if(!SR){doSubmit("（音声非対応）",false);return}
     const r=new SR();r.lang="ja-JP";r.interimResults=true;r.continuous=false;
     rRef.current=r;
-    t0Ref.current=Date.now();
+    t0Ref.current=0; // will be set on first voice input
     let submitted=false;
+    let firstInputTime=0;
 
     r.onresult=(e)=>{
       const t=Array.from(e.results).map(x=>x[0].transcript).join("");
       setUIn(t);
+      // Record when user first started speaking
+      if(!firstInputTime)firstInputTime=Date.now();
       if(e.results[e.results.length-1].isFinal&&!submitted){
         submitted=true;
-        const sec=(Date.now()-t0Ref.current)/1000;
+        // Judge from when user started speaking, with generous 6s window
+        const sec=firstInputTime?(Date.now()-firstInputTime)/1000:99;
         clearTimeout(ltRef.current);clearInterval(countRef.current);
         stopRec();
-        doSubmit(t,sec<=5);
+        doSubmit(t,sec<=6);
       }
     };
     r.onerror=(e)=>{
@@ -264,10 +282,10 @@ function App(){
       setListening(false);
       if(!submitted){
         submitted=true;clearTimeout(ltRef.current);clearInterval(countRef.current);
-        // Use whatever text is in the input
         const currentText=uInRef.current;
         if(currentText&&currentText.trim()){
-          doSubmit(currentText.trim(),((Date.now()-t0Ref.current)/1000)<=5);
+          const sec=firstInputTime?(Date.now()-firstInputTime)/1000:99;
+          doSubmit(currentText.trim(),sec<=6);
         }
       }
     };
@@ -471,9 +489,10 @@ function App(){
               <div style={{background:C.bg2,borderRadius:14,padding:14,border:`1px solid ${C.accentDim}`,marginBottom:10}}>
                 <div style={{...mf,fontSize:11,color:C.accent,letterSpacing:3,marginBottom:6}}>ENDING</div>
                 <div style={{fontSize:20,color:C.text,fontWeight:700,marginBottom:8,lineHeight:1.4}}>{ending.title}</div>
-                <p style={{fontSize:15,color:C.warm,lineHeight:1.8}}>{ending.summary}</p>
+                <p style={{fontSize:15,color:C.warm,lineHeight:1.8,marginBottom:8}}>{ending.summary}</p>
+                {ending.lesson&&<p style={{fontSize:14,color:C.accent,lineHeight:1.7,padding:"8px 10px",background:C.accentBg,borderRadius:8,marginBottom:6}}>{ending.lesson}</p>}
                 {total>0&&(
-                  <div style={{marginTop:10,padding:"8px 12px",background:C.bg,borderRadius:10,textAlign:"center"}}>
+                  <div style={{marginTop:6,padding:"8px 12px",background:C.bg,borderRadius:10,textAlign:"center"}}>
                     <span style={{...mf,fontSize:15,color:C.accent}}>即断 {fast}/{total}</span>
                   </div>
                 )}
@@ -493,6 +512,30 @@ function App(){
           <div style={{...mf,fontSize:12,color:C.accent,letterSpacing:3,marginBottom:20,textAlign:"center"}}>ENDING</div>
           <div style={{fontSize:24,color:C.text,fontWeight:700,marginBottom:16,lineHeight:1.4,textAlign:"center"}}>{ending.title}</div>
           <p style={{fontSize:16,color:C.warm,lineHeight:2,marginBottom:16}}>{ending.summary}</p>
+
+          {/* Lesson */}
+          {ending.lesson&&(
+            <div style={{background:C.accentBg,borderRadius:14,padding:16,marginBottom:12,border:`1px solid ${C.accentDim}`}}>
+              <div style={{...mf,fontSize:12,color:C.accent,letterSpacing:2,marginBottom:8}}>LESSON</div>
+              <p style={{fontSize:16,color:C.text,lineHeight:1.8,fontWeight:500}}>{ending.lesson}</p>
+            </div>
+          )}
+
+          {/* Pattern */}
+          {ending.pattern&&(
+            <div style={{background:C.bg2,borderRadius:14,padding:16,marginBottom:12,border:`1px solid ${C.border}`}}>
+              <div style={{...mf,fontSize:12,color:C.accent,letterSpacing:2,marginBottom:8}}>YOUR PATTERN</div>
+              <p style={{fontSize:15,color:C.warm,lineHeight:1.8}}>{ending.pattern}</p>
+            </div>
+          )}
+
+          {/* If Only */}
+          {ending.ifOnly&&(
+            <div style={{background:C.bg2,borderRadius:14,padding:16,marginBottom:12,border:`1px solid ${C.border}`}}>
+              <div style={{...mf,fontSize:12,color:C.textSub,letterSpacing:2,marginBottom:8}}>IF ONLY...</div>
+              <p style={{fontSize:15,color:C.textSub,lineHeight:1.8,fontStyle:"italic"}}>{ending.ifOnly}</p>
+            </div>
+          )}
 
           {total>0&&(
             <div style={{background:C.bg2,borderRadius:14,padding:16,marginBottom:16,border:`1px solid ${C.accentDim}`,textAlign:"center"}}>
