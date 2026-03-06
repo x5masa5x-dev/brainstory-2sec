@@ -67,8 +67,16 @@ endingSummary,endingLesson,endingPattern,endingIfOnlyは空文字にする。
 - どんな回答もできるだけ物語に反映する
 - ふざけた回答→ユーモアで処理して進める
 - 曖昧な回答→主人公が少し迷いつつ行動する描写にする
-- 危険・暴力→成功させない
+- 危険・暴力・犯罪→成功させない
+- 不可能なこと（空を飛ぶなど）→失敗するが別の展開につなげる
 - 「時間切れ」「迷った」「聞き取れなかった」→主人公が迷っている間に状況が変わる描写にして物語を前に進める。同じ場面を繰り返してはいけない
+
+# ユーザーの選択の扱い（重要）
+- ユーザーの選択を勝手に「良い方向」に軌道修正しないこと
+- 悪い選択・ずるい選択・変わった選択をしたら、その結果をリアルに描く
+- ただし悪い選択が必ず最悪の結果になるとは限らない。思わぬ発見や面白い展開もありうる
+- 逆に良い選択が必ず良い結果になるとも限らない
+- このゲームは「普段やらないことを試してみる」体験でもある。意外な選択を面白がること
 
 # 絶対禁止
 - 前の場面と同じ内容・同じ描写を繰り返すこと
@@ -143,6 +151,7 @@ function App(){
   const [fast,setFast]=useState(0);
   const [total,setTotal]=useState(0);
   const [micReady,setMicReady]=useState(false);
+  const [showEnding,setShowEnding]=useState(false);
 
   const iRef=useRef(null);
   const sRef=useRef(null);
@@ -218,7 +227,7 @@ function App(){
       setSc(scenario);
       setScenes([{type:"scene",text:scenario.firstScene,sceneNumber:0}]);
       setHist([{role:"user",content:"設定：「"+scenario.title+"」\n"+scenario.setting+"\n\n最初の場面：\n"+scenario.firstScene+"\n\nsceneNumber=1から。了解とだけ答えて。"},{role:"assistant",content:"了解"}]);
-      setALog([]);setEnding(null);setFast(0);setTotal(0);subRef.current=false;setChallenging(false);setCountNum(null);fade();
+      setALog([]);setEnding(null);setShowEnding(false);setFast(0);setTotal(0);subRef.current=false;setChallenging(false);setCountNum(null);fade();
       // Go to mic permission step
       setPhase("micprep");
     }catch(err){alert("エラー: "+err.message)}
@@ -487,6 +496,14 @@ function App(){
                   </div>
                 </>
               )}
+            </div>
+          ):!showEnding?(
+            /* Ending reached but not yet revealed */
+            <div style={{flexShrink:0,paddingBottom:8,animation:"slideUp .5s ease"}}>
+              <button onClick={()=>setShowEnding(true)}
+                style={{width:"100%",padding:16,border:`2px solid ${C.accent}`,borderRadius:14,background:C.accentBg,color:C.accent,fontSize:17,fontWeight:700,cursor:"pointer",letterSpacing:1}}>
+                エンディングへ
+              </button>
             </div>
           ):(
             <div style={{flexShrink:0,animation:"slideUp .5s ease",paddingBottom:8}}>
